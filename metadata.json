@@ -1,0 +1,7 @@
+{
+  "name": "Daily — Show Up. Show The Work.",
+  "description": "Daily is a purpose-driven minimal dark social platform where people share their progress, achievements, insights, opinions, creative work and participate in challenges.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
