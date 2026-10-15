@@ -11,7 +11,8 @@ import {
   RefreshCw, 
   Check, 
   Sparkles,
-  UserCheck
+  UserCheck,
+  LogOut
 } from 'lucide-react';
 import { Author } from '../../types';
 import { isSupabaseConfigured } from '../../lib/supabase';
@@ -23,6 +24,7 @@ interface SettingsModalProps {
   onToggleHubPrivacy?: (newPrivacy: 'public' | 'private') => void;
   onRestartOnboarding?: () => void;
   onResetToFreshData?: () => void;
+  onSignOut?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ 
@@ -31,6 +33,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onToggleHubPrivacy,
   onRestartOnboarding,
   onResetToFreshData,
+  onSignOut,
 }) => {
   const isPrivate = currentUser?.accountabilityHubPrivacy === 'private';
   const authSession = StorageService.getAuthSession();
@@ -222,6 +225,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               )}
             </div>
+          )}
+
+          {onSignOut && (
+            <button
+              type="button"
+              onClick={() => {
+                onSignOut();
+                onClose();
+              }}
+              className="w-full py-2.5 rounded-xl bg-[#141822] hover:bg-red-500/15 border border-[#202738] hover:border-red-500/30 text-xs font-semibold text-[#8A92A6] hover:text-red-400 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            >
+              <LogOut size={13} />
+              <span>Sign Out of Account Session</span>
+            </button>
           )}
 
           <button

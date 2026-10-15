@@ -39,6 +39,7 @@ import { CreateCommunityModal } from './components/modals/CreateCommunityModal';
 import { ShareModal } from './components/modals/ShareModal';
 import { OnboardingAuthScreen } from './components/screens/OnboardingAuthScreen';
 import { StorageService } from './services/storageService';
+import { supabase } from './lib/supabase';
 import { Smartphone, Monitor, Columns } from 'lucide-react';
 
 export default function App() {
@@ -112,6 +113,88 @@ export default function App() {
   React.useEffect(() => {
     StorageService.saveSquads(squads);
   }, [squads]);
+
+  // Listen for Supabase session and auth state changes
+  React.useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        const u = session.user;
+        const meta = u.user_metadata || {};
+        const derivedName = meta.name || meta.full_name || u.email?.split('@')[0] || 'Daily Builder';
+        const derivedUsername = meta.username || u.email?.split('@')[0]?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'builder';
+        const derivedAvatar = meta.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80';
+
+        const authUser: Author = {
+          ...currentUser,
+          id: u.id,
+          name: derivedName,
+          username: derivedUsername,
+          avatar: derivedAvatar,
+          isCurrentUser: true,
+        };
+
+        setCurrentUser(authUser);
+        setViewingUser(authUser);
+        StorageService.saveCurrentUser(authUser);
+        StorageService.setOnboardingCompleted(true);
+        StorageService.setAuthSession({
+          provider: (u.app_metadata?.provider as any) || 'email',
+          email: u.email,
+        });
+        setIsOnboardingDone(true);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user) {
+        const u = session.user;
+        const meta = u.user_metadata || {};
+        const derivedName = meta.name || meta.full_name || u.email?.split('@')[0] || 'Daily Builder';
+        const derivedUsername = meta.username || u.email?.split('@')[0]?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'builder';
+        const derivedAvatar = meta.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80';
+
+        const authUser: Author = {
+          ...currentUser,
+          id: u.id,
+          name: derivedName,
+          username: derivedUsername,
+          avatar: derivedAvatar,
+          isCurrentUser: true,
+        };
+
+        setCurrentUser(authUser);
+        setViewingUser(authUser);
+        StorageService.saveCurrentUser(authUser);
+        StorageService.setOnboardingCompleted(true);
+        StorageService.setAuthSession({
+          provider: (u.app_metadata?.provider as any) || 'email',
+          email: u.email,
+        });
+        setIsOnboardingDone(true);
+        showToast(`Authenticated with Supabase as ${derivedName}!`);
+      } else if (event === 'SIGNED_OUT') {
+        StorageService.setOnboardingCompleted(false);
+        setIsOnboardingDone(false);
+        showToast('Signed out of Supabase session.');
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleSignOut = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      // ignore
+    }
+    StorageService.setOnboardingCompleted(false);
+    StorageService.setAuthSession({ provider: 'guest' });
+    setIsOnboardingDone(false);
+    showToast('Signed out of account session');
+  };
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -1585,6 +1668,7 @@ export default function App() {
             setIsOnboardingDone(false);
           }}
           onResetToFreshData={handleResetToFreshData}
+          onSignOut={handleSignOut}
           onClose={() => setIsSettingsOpen(false)}
         />
       )}
