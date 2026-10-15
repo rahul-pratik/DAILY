@@ -242,11 +242,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <p className="text-xs text-[#9298A3] font-mono">@{user.username}</p>
             <span className="text-[#9298A3]/50">·</span>
-            <span className="text-xs font-mono text-white/90">
-              <strong className="text-white">{(user.followersCount || 1420).toLocaleString()}</strong>{' '}
-              <span className="text-[#9298A3]">followers</span>
-            </span>
-            <span className="text-[#9298A3]/50">·</span>
             <button 
               type="button"
               onClick={() => setActiveTab('following')}

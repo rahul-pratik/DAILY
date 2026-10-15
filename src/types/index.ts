@@ -175,6 +175,33 @@ export interface Community {
   }[];
 }
 
+export interface SquadEntrySession {
+  challengeId: string;
+  challengeTitle: string;
+  initiatedBy: {
+    name: string;
+    username: string;
+  };
+  status: 'pending_acceptance' | 'entered';
+  acceptedUsernames: string[];
+}
+
+export interface Squad {
+  id: string;
+  name: string;
+  category: string;
+  requiredSize: number;
+  challengeId?: string;
+  challengeTitle?: string;
+  creator: {
+    name: string;
+    username: string;
+    avatar?: string;
+  };
+  members: SquadMember[];
+  entrySession?: SquadEntrySession;
+}
+
 export interface NotificationItem {
   id: string;
   user: Author;
@@ -182,4 +209,12 @@ export interface NotificationItem {
   target: string;
   time: string;
   read: boolean;
+  type?: 'like' | 'comment' | 'follow' | 'squad_invitation' | 'squad_entry';
+  squadInvitation?: {
+    squadId: string;
+    squadName: string;
+    challengeTitle: string;
+    requiredMembers: number;
+    status: 'pending' | 'accepted' | 'declined';
+  };
 }

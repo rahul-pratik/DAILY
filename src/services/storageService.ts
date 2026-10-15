@@ -1,4 +1,4 @@
-import { Author, Challenge, Community, NotificationItem, Post, ToDoItem } from '../types';
+import { Author, Challenge, Community, NotificationItem, Post, Squad, ToDoItem } from '../types';
 import { 
   CURRENT_USER, 
   INITIAL_POSTS, 
@@ -6,6 +6,7 @@ import {
   INITIAL_COMMUNITIES, 
   INITIAL_NOTIFICATIONS, 
   INITIAL_TODOS,
+  INITIAL_SQUADS,
   OTHER_USERS
 } from '../data/initialData';
 
@@ -19,6 +20,7 @@ const KEYS = {
   TODOS: 'daily_app_todos',
   NOTIFICATIONS: 'daily_app_notifications',
   CREATORS: 'daily_app_creators',
+  SQUADS: 'daily_app_squads',
 };
 
 // Safe JSON parser
@@ -135,6 +137,15 @@ export const StorageService = {
     safeSet(KEYS.CREATORS, creators);
   },
 
+  // Squads
+  getSquads(): Squad[] {
+    return safeParse<Squad[]>(KEYS.SQUADS, INITIAL_SQUADS);
+  },
+
+  saveSquads(squads: Squad[]): void {
+    safeSet(KEYS.SQUADS, squads);
+  },
+
   // Reset entire application data
   clearAll(): void {
     try {
@@ -147,6 +158,7 @@ export const StorageService = {
       localStorage.removeItem(KEYS.TODOS);
       localStorage.removeItem(KEYS.NOTIFICATIONS);
       localStorage.removeItem(KEYS.CREATORS);
+      localStorage.removeItem(KEYS.SQUADS);
     } catch (e) {
       console.error('Error clearing storage:', e);
     }

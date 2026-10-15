@@ -224,46 +224,48 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
             </div>
           </div>
         ) : !challenge.joined ? (
-          /* Not Joined Yet - Start Challenge at Day 1 */
-          <div className="space-y-2.5 pt-1">
-            <button
-              onClick={() => onToggleJoin?.(challenge.id)}
-              className="w-full py-2.5 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] active:scale-95 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-[#2166FF]/25 transition-all cursor-pointer"
-            >
-              <Flame size={15} />
-              <span>Start Challenge (Mark as Day 1)</span>
-            </button>
-            <p className="text-[11px] text-[#9298A3] text-center">
-              Starting this challenge marks your streak as Day 1.
-            </p>
-          </div>
-        ) : (
-          /* In Progress - Upload Proof & Cohort Chat & Leave Challenge */
+          /* Not Joined Yet - Join Challenge & Cohort Chat */
           <div className="space-y-2 pt-1">
-            <div className="flex items-center gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <button
-                onClick={() => setShowProofForm(!showProofForm)}
-                className="flex-1 py-2.5 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] active:scale-95 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-md shadow-[#2166FF]/25 transition-all cursor-pointer"
+                type="button"
+                onClick={() => onToggleJoin?.(challenge.id)}
+                className="py-2.5 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] active:scale-95 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-lg shadow-[#2166FF]/25 transition-all cursor-pointer"
               >
-                <Flame size={15} />
-                <span>Upload Photo Proof & Check In</span>
+                <Plus size={14} />
+                <span>Join Challenge</span>
               </button>
-
               <button
+                type="button"
                 onClick={onOpenCohortChat}
-                className="px-3.5 py-2.5 rounded-xl bg-[#101010] hover:bg-[#1a1f29] border border-[#20242C] text-xs font-semibold text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+                className="py-2.5 rounded-xl bg-[#10141E] hover:bg-[#1A2234] border border-[#202738] active:scale-95 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
               >
                 <MessageSquare size={14} className="text-[#3B82FF]" />
                 <span>Cohort Chat</span>
               </button>
             </div>
+            <p className="text-[11px] text-[#9298A3] text-center">
+              Join this challenge to participate in the cohort sprint and submit daily photo proofs.
+            </p>
+          </div>
+        ) : (
+          /* In Progress - ONLY Cohort Chat */
+          <div className="space-y-2 pt-1">
+            <button
+              type="button"
+              onClick={onOpenCohortChat}
+              className="w-full py-2.5 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] active:scale-95 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-md shadow-[#2166FF]/25 transition-all cursor-pointer"
+            >
+              <MessageSquare size={15} />
+              <span>Open Cohort Chat & Proofs</span>
+            </button>
 
             <div className="flex items-center justify-between pt-1">
               <span className="text-[11px] text-emerald-400 font-medium flex items-center gap-1">
                 <CheckCircle size={12} /> Active sprint in progress
               </span>
 
-              {/* Leave Challenge button resets to Day 0 per requirement */}
+              {/* Leave Challenge button */}
               <button
                 type="button"
                 onClick={() => onToggleJoin?.(challenge.id)}

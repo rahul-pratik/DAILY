@@ -34,7 +34,7 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
   const [content, setContent] = useState('');
   const [selectedPurpose, setSelectedPurpose] = useState<PurposeLabel | undefined>(undefined);
   const [selectedMedia, setSelectedMedia] = useState<string[]>([]);
-  const [audience, setAudience] = useState<'Public' | 'Followers' | 'Tech & Building'>('Public');
+  const [audience, setAudience] = useState<'Public' | 'Followers'>('Public');
   const [showAudienceMenu, setShowAudienceMenu] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -190,17 +190,6 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
                 }`}
               >
                 Followers Only
-              </button>
-              <button
-                onClick={() => {
-                  setAudience('Tech & Building');
-                  setShowAudienceMenu(false);
-                }}
-                className={`w-full text-left px-3 py-2 text-xs transition-colors hover:bg-[#101010] cursor-pointer ${
-                  audience === 'Tech & Building' ? 'text-[#2166FF] font-semibold' : 'text-white'
-                }`}
-              >
-                Community: Tech & Building
               </button>
             </div>
           )}

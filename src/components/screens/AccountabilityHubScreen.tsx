@@ -317,42 +317,45 @@ export const AccountabilityHubScreen: React.FC<AccountabilityHubScreenProps> = (
         </div>
       )}
 
-      {/* Segmented 3-Tab Navigator */}
-      <div className="grid grid-cols-3 gap-1 p-1 bg-[#080B10] border border-[#20242C] rounded-2xl mb-4">
+      {/* Sleek Minimal 3-Tab Navigator */}
+      <div className="grid grid-cols-3 gap-1.5 p-1.5 bg-[#090C12] border border-[#1E232F] rounded-2xl mb-5 shadow-sm">
         <button
+          type="button"
           onClick={() => setActiveTab('todo')}
-          className={`py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+          className={`py-2.5 px-2 sm:px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
             activeTab === 'todo'
-              ? 'bg-[#2166FF] text-white shadow-sm'
-              : 'text-[#9298A3] hover:text-white'
+              ? 'bg-[#2166FF] text-white shadow-md shadow-[#2166FF]/20 font-bold'
+              : 'text-[#9298A3] hover:text-white hover:bg-[#121620]'
           }`}
         >
-          <Calendar size={13} />
-          <span>To-Do ({toDoList.filter(t => !t.completed).length})</span>
+          <Calendar size={14} className={activeTab === 'todo' ? 'text-white' : 'text-[#9298A3]'} />
+          <span className="truncate">To-Do</span>
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('completed')}
-          className={`py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+          className={`py-2.5 px-2 sm:px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
             activeTab === 'completed'
-              ? 'bg-[#2166FF] text-white shadow-sm'
-              : 'text-[#9298A3] hover:text-white'
+              ? 'bg-[#2166FF] text-white shadow-md shadow-[#2166FF]/20 font-bold'
+              : 'text-[#9298A3] hover:text-white hover:bg-[#121620]'
           }`}
         >
-          <Trophy size={13} />
-          <span>Done ({allFinished.length})</span>
+          <Trophy size={14} className={activeTab === 'completed' ? 'text-white' : 'text-[#9298A3]'} />
+          <span className="truncate">Challenges Done</span>
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('communities')}
-          className={`py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+          className={`py-2.5 px-2 sm:px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
             activeTab === 'communities'
-              ? 'bg-[#2166FF] text-white shadow-sm'
-              : 'text-[#9298A3] hover:text-white'
+              ? 'bg-[#2166FF] text-white shadow-md shadow-[#2166FF]/20 font-bold'
+              : 'text-[#9298A3] hover:text-white hover:bg-[#121620]'
           }`}
         >
-          <Globe size={13} />
-          <span>Hubs ({joinedCommunities.length})</span>
+          <Globe size={14} className={activeTab === 'communities' ? 'text-white' : 'text-[#9298A3]'} />
+          <span className="truncate">Hubs</span>
         </button>
       </div>
 
@@ -726,29 +729,31 @@ export const AccountabilityHubScreen: React.FC<AccountabilityHubScreenProps> = (
         <div className="space-y-4">
           {/* Subheader Switcher: All Stuffs Written vs Directory */}
           <div className="flex items-center justify-between gap-2">
-            <div className="grid grid-cols-2 gap-1 p-1 bg-[#080B10] border border-[#20242C] rounded-2xl flex-1">
+            <div className="grid grid-cols-2 gap-1 p-1 bg-[#090C12] border border-[#1E232F] rounded-2xl flex-1">
               <button
+                type="button"
                 onClick={() => setHubsSubView('writings')}
-                className={`py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                className={`py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                   hubsSubView === 'writings'
                     ? 'bg-[#2166FF] text-white shadow-sm'
-                    : 'text-[#9298A3] hover:text-white'
+                    : 'text-[#9298A3] hover:text-white hover:bg-[#121620]'
                 }`}
               >
                 <MessageSquare size={13} />
-                <span>All Stuffs Written ({allWritings.length})</span>
+                <span>All Stuffs Written</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => setHubsSubView('directories')}
-                className={`py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                className={`py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                   hubsSubView === 'directories'
                     ? 'bg-[#2166FF] text-white shadow-sm'
-                    : 'text-[#9298A3] hover:text-white'
+                    : 'text-[#9298A3] hover:text-white hover:bg-[#121620]'
                 }`}
               >
                 <Globe size={13} />
-                <span>Joined Hubs ({joinedCommunities.length})</span>
+                <span>Joined Hubs</span>
               </button>
             </div>
 

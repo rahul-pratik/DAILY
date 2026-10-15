@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { 
   ArrowRight, 
   ChevronLeft, 
-  Check, 
   Mail, 
   Lock, 
   User, 
@@ -17,23 +16,12 @@ interface OnboardingAuthScreenProps {
   allCommunities?: any[];
 }
 
-const INTERESTS = [
-  'Coding & Tech',
-  'Startups & SaaS',
-  'AI & ML',
-  'Fitness & Health',
-  'Product Design',
-  'Reading & Writing',
-  'Daily Habits',
-  'Community Squads'
-];
-
 export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
   onComplete,
   initialUser,
 }) => {
-  // Exactly 3 screens: 1: login/signup, 2: interests, 3: name, username, bio
-  const [screen, setScreen] = useState<1 | 2 | 3>(1);
+  // Two minimal screens: 1: login/signup, 2: name, username, bio
+  const [screen, setScreen] = useState<1 | 2>(1);
 
   // Screen 1: Auth state
   const [authMode, setAuthMode] = useState<'signup' | 'login'>('signup');
@@ -42,14 +30,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
   const [appleAlert, setAppleAlert] = useState(false);
   const [authProvider, setAuthProvider] = useState<'google' | 'email' | 'guest'>('google');
 
-  // Screen 2: Interests state
-  const [selectedInterests, setSelectedInterests] = useState<string[]>([
-    'Coding & Tech',
-    'Startups & SaaS',
-    'Daily Habits'
-  ]);
-
-  // Screen 3: Name, username, bio state
+  // Screen 2: Name, username, bio state
   const [name, setName] = useState(initialUser?.name || '');
   const [username, setUsername] = useState(initialUser?.username || '');
   const [bio, setBio] = useState(initialUser?.bio || '');
@@ -79,14 +60,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
     setScreen(2);
   };
 
-  // Screen 2: Toggle Interest
-  const toggleInterest = (item: string) => {
-    setSelectedInterests((prev) =>
-      prev.includes(item) ? prev.filter((i) => i !== item) : [...prev, item]
-    );
-  };
-
-  // Screen 3: Finish Onboarding
+  // Screen 2: Finish Onboarding
   const handleFinish = (e: React.FormEvent) => {
     e.preventDefault();
     const finalUser: Author = {
@@ -102,7 +76,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
       accountabilityHubPrivacy: 'public',
     };
 
-    onComplete(finalUser, selectedInterests, {
+    onComplete(finalUser, ['Coding & Tech', 'Startups & SaaS', 'Daily Habits'], {
       provider: authProvider,
       email: email || undefined,
     });
@@ -117,7 +91,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
           {screen > 1 ? (
             <button
               type="button"
-              onClick={() => setScreen((prev) => (prev - 1) as 1 | 2 | 3)}
+              onClick={() => setScreen(1)}
               className="text-xs text-[#8A92A6] hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
             >
               <ChevronLeft size={16} />
@@ -128,14 +102,12 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
           )}
 
           <div className="flex items-center gap-2">
-            {[1, 2, 3].map((stepNum) => (
+            {[1, 2].map((stepNum) => (
               <div
                 key={stepNum}
                 className={`h-1.5 rounded-full transition-all duration-200 ${
                   stepNum === screen
                     ? 'w-7 bg-[#2166FF]'
-                    : stepNum < screen
-                    ? 'w-2 bg-[#2166FF]/60'
                     : 'w-2 bg-[#1C2230]'
                 }`}
               />
@@ -143,7 +115,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
           </div>
 
           <span className="text-[11px] font-mono text-[#8A92A6]">
-            {screen}/3
+            {screen}/2
           </span>
         </div>
 
@@ -295,54 +267,8 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
           </div>
         )}
 
-        {/* ================= SCREEN 2: INTERESTS ================= */}
+        {/* ================= SCREEN 2: NAME, USERNAME, BIO ================= */}
         {screen === 2 && (
-          <div className="space-y-5 animate-fade-in">
-            <div className="text-center space-y-1">
-              <h2 className="text-xl font-bold tracking-tight text-white">
-                Pick Your Interests
-              </h2>
-              <p className="text-xs text-[#8A92A6]">
-                Select topics you want to follow and build around.
-              </p>
-            </div>
-
-            {/* Interest Tags Grid */}
-            <div className="flex flex-wrap gap-2 justify-center py-2">
-              {INTERESTS.map((item) => {
-                const isSelected = selectedInterests.includes(item);
-                return (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => toggleInterest(item)}
-                    className={`px-3.5 py-2 rounded-xl text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
-                      isSelected
-                        ? 'bg-[#2166FF] text-white border border-[#2166FF]'
-                        : 'bg-[#121620] text-[#8A92A6] hover:text-white border border-[#202738]'
-                    }`}
-                  >
-                    {isSelected && <Check size={12} />}
-                    <span>{item}</span>
-                  </button>
-                );
-              })}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setScreen(3)}
-              disabled={selectedInterests.length === 0}
-              className="w-full py-2.5 rounded-xl bg-[#2166FF] hover:bg-[#1A52CC] disabled:opacity-40 text-xs font-semibold text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <span>Next</span>
-              <ArrowRight size={14} />
-            </button>
-          </div>
-        )}
-
-        {/* ================= SCREEN 3: NAME, USERNAME, BIO ================= */}
-        {screen === 3 && (
           <form onSubmit={handleFinish} className="space-y-5 animate-fade-in">
             <div className="text-center space-y-1">
               <h2 className="text-xl font-bold tracking-tight text-white">

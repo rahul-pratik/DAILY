@@ -13,7 +13,7 @@ import {
   INITIAL_NOTIFICATIONS,
   INITIAL_TODOS
 } from './data/initialData';
-import { Author, Challenge, Community, JoinRequest, NotificationItem, Post, PurposeLabel, ScreenType, ToDoItem } from './types';
+import { Author, Challenge, CohortProof, Community, JoinRequest, NotificationItem, Post, PurposeLabel, ScreenType, Squad, ToDoItem } from './types';
 import { TopHeader } from './components/TopHeader';
 import { Navigation } from './components/Navigation';
 import { HomeScreen } from './components/screens/HomeScreen';
@@ -60,6 +60,7 @@ export default function App() {
   const [toDoList, setToDoList] = useState<ToDoItem[]>(StorageService.getTodos());
   const [activeChallenge, setActiveChallenge] = useState<Challenge | null>(INITIAL_CHALLENGES[0]);
   const [activeCommunity, setActiveCommunity] = useState<Community | null>(INITIAL_COMMUNITIES[0]);
+  const [squads, setSquads] = useState<Squad[]>(StorageService.getSquads());
 
   // Modal states
   const [selectedPostForComments, setSelectedPostForComments] = useState<Post | null>(null);
@@ -107,6 +108,10 @@ export default function App() {
   React.useEffect(() => {
     StorageService.saveCreators(allCreators);
   }, [allCreators]);
+
+  React.useEffect(() => {
+    StorageService.saveSquads(squads);
+  }, [squads]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -315,7 +320,6 @@ export default function App() {
       commentsCount: 0,
       isLiked: true,
       isSaved: false,
-      communityName: data.audience && data.audience.includes('Community') ? 'Tech & Building' : undefined,
     };
 
     setPosts([newPost, ...posts]);
@@ -523,6 +527,267 @@ export default function App() {
 
     setChallenges([newChallenge, ...challenges]);
     showToast(`🎉 New Challenge created: "${newChallenge.title}" (Day 1)`);
+  };
+
+  // Interactions: Add Cohort Proof & update challenge progress
+  const handleAddCohortProof = (challengeId: string, proof: CohortProof) => {
+    setChallenges((prev) =>
+      prev.map((ch) => {
+        if (ch.id === challengeId) {
+          const existing = ch.squadProofs || [];
+          return {
+            ...ch,
+            squadProofs: [proof, ...existing],
+            current: Math.min((ch.current || 0) + 1, ch.target),
+          };
+        }
+        return ch;
+      })
+    );
+    showToast(`✓ Photo proof recorded for ${proof.author.name}!`);
+  };
+
+  // Squad Management Handlers
+  const handleCreateSquad = (data: Partial<Squad>) => {
+    const newSquad: Squad = {
+      id: `squad_${Date.now()}`,
+      name: data.name || 'New Squad',
+      category: data.category || 'fitness',
+      requiredSize: data.requiredSize || 5,
+      challengeId: data.challengeId,
+      challengeTitle: data.challengeTitle,
+      creator: {
+        name: currentUser.name,
+        username: currentUser.username,
+        avatar: currentUser.avatar,
+      },
+      members: data.members || [
+        {
+          id: currentUser.id,
+          name: currentUser.name,
+          username: currentUser.username,
+          avatar: currentUser.avatar,
+          dayReached: 1,
+          role: 'creator',
+        }
+      ],
+    };
+
+    setSquads(prev => [newSquad, ...prev]);
+
+    // Send invitations to invited members
+    (data.members || []).forEach(m => {
+      if (m.username !== currentUser.username) {
+        const notif: NotificationItem = {
+          id: `notif_sq_${Date.now()}_${m.username}`,
+          user: currentUser,
+          action: `invited you to join squad "${newSquad.name}"`,
+          target: `For ${newSquad.challengeTitle || 'Sprint'} (${newSquad.members.length}/${newSquad.requiredSize} members)`,
+          time: 'Just now',
+          read: false,
+          type: 'squad_invitation',
+          squadInvitation: {
+            squadId: newSquad.id,
+            squadName: newSquad.name,
+            challengeTitle: newSquad.challengeTitle || 'Squad Sprint',
+            requiredMembers: newSquad.requiredSize,
+            status: 'pending',
+          }
+        };
+        setNotifications(prev => [notif, ...prev]);
+      }
+    });
+
+    showToast(`🎉 Squad "${newSquad.name}" created! Invitations sent.`);
+  };
+
+  const handleInviteMemberToSquad = (squadId: string, username: string) => {
+    const targetSquad = squads.find(s => s.id === squadId);
+    if (!targetSquad) return;
+
+    const foundUser = allCreators.find(u => u.username === username);
+    const newMember: Author = foundUser || {
+      id: `u_${username}`,
+      name: username,
+      username: username,
+      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+    };
+
+    // Send squad invitation notification
+    const newNotif: NotificationItem = {
+      id: `notif_invite_${Date.now()}`,
+      user: currentUser,
+      action: `invited you to join squad "${targetSquad.name}"`,
+      target: `For ${targetSquad.challengeTitle || 'Challenge Sprint'} (${targetSquad.members.length + 1}/${targetSquad.requiredSize} members)`,
+      time: 'Just now',
+      read: false,
+      type: 'squad_invitation',
+      squadInvitation: {
+        squadId: targetSquad.id,
+        squadName: targetSquad.name,
+        challengeTitle: targetSquad.challengeTitle || 'Squad Sprint',
+        requiredMembers: targetSquad.requiredSize,
+        status: 'pending',
+      }
+    };
+    setNotifications(prev => [newNotif, ...prev]);
+
+    // Add to squad roster
+    setSquads(prev => prev.map(sq => {
+      if (sq.id === squadId && !sq.members.some(m => m.username === username)) {
+        return {
+          ...sq,
+          members: [
+            ...sq.members,
+            {
+              id: newMember.id,
+              name: newMember.name,
+              username: newMember.username,
+              avatar: newMember.avatar,
+              dayReached: 1,
+              role: 'member',
+            }
+          ]
+        };
+      }
+      return sq;
+    }));
+
+    showToast(`✉️ Squad invitation sent to @${username}!`);
+  };
+
+  const handleEnterChallengeWithSquad = (squadId: string, challengeId: string) => {
+    const targetSquad = squads.find(s => s.id === squadId);
+    if (!targetSquad) return;
+    const targetCh = challenges.find(c => c.id === challengeId) || challenges[0];
+
+    if (targetSquad.members.length !== targetSquad.requiredSize) {
+      showToast(`⚠️ Not eligible: Squad requires exactly ${targetSquad.requiredSize} members (currently ${targetSquad.members.length})`);
+      return;
+    }
+
+    setSquads(prev => prev.map(sq => {
+      if (sq.id === squadId) {
+        return {
+          ...sq,
+          challengeId,
+          challengeTitle: targetCh.title,
+          entrySession: {
+            challengeId,
+            challengeTitle: targetCh.title,
+            initiatedBy: {
+              name: currentUser.name,
+              username: currentUser.username,
+            },
+            status: 'pending_acceptance',
+            acceptedUsernames: [currentUser.username],
+          }
+        };
+      }
+      return sq;
+    }));
+
+    showToast(`📢 @${currentUser.username} has taken ${targetSquad.name} for ${targetCh.title}! Awaiting squad acceptance.`);
+  };
+
+  const handleAcceptSquadEntry = (squadId: string, username: string) => {
+    setSquads(prev => prev.map(sq => {
+      if (sq.id === squadId && sq.entrySession) {
+        const currentAccepted = sq.entrySession.acceptedUsernames;
+        const newAccepted = currentAccepted.includes(username) ? currentAccepted : [...currentAccepted, username];
+        const isAllAccepted = newAccepted.length >= sq.requiredSize;
+
+        if (isAllAccepted) {
+          setChallenges(prevCh => prevCh.map(c => c.id === sq.entrySession?.challengeId ? { ...c, joined: true } : c));
+          showToast(`🎉 All ${sq.requiredSize} members accepted! Squad entered "${sq.entrySession.challengeTitle}"!`);
+        }
+
+        return {
+          ...sq,
+          entrySession: {
+            ...sq.entrySession,
+            acceptedUsernames: newAccepted,
+            status: isAllAccepted ? 'entered' : 'pending_acceptance',
+          }
+        };
+      }
+      return sq;
+    }));
+  };
+
+  const handleAcceptAllSquadEntry = (squadId: string) => {
+    setSquads(prev => prev.map(sq => {
+      if (sq.id === squadId && sq.entrySession) {
+        const allUsernames = sq.members.map(m => m.username);
+        setChallenges(prevCh => prevCh.map(c => c.id === sq.entrySession?.challengeId ? { ...c, joined: true } : c));
+        showToast(`🎉 All members accepted! Squad has entered "${sq.entrySession.challengeTitle}"!`);
+
+        return {
+          ...sq,
+          entrySession: {
+            ...sq.entrySession,
+            acceptedUsernames: allUsernames,
+            status: 'entered',
+          }
+        };
+      }
+      return sq;
+    }));
+  };
+
+  const handleAcceptSquadInvite = (squadId: string, notifId: string) => {
+    setNotifications(prev => prev.map(n => {
+      if (n.id === notifId && n.squadInvitation) {
+        return {
+          ...n,
+          read: true,
+          squadInvitation: {
+            ...n.squadInvitation,
+            status: 'accepted',
+          }
+        };
+      }
+      return n;
+    }));
+
+    setSquads(prev => prev.map(sq => {
+      if (sq.id === squadId && !sq.members.some(m => m.username === currentUser.username)) {
+        return {
+          ...sq,
+          members: [
+            ...sq.members,
+            {
+              id: currentUser.id,
+              name: currentUser.name,
+              username: currentUser.username,
+              avatar: currentUser.avatar,
+              dayReached: 1,
+              role: 'member',
+            }
+          ]
+        };
+      }
+      return sq;
+    }));
+
+    showToast(`✓ Accepted squad invitation! You joined the roster.`);
+  };
+
+  const handleDeclineSquadInvite = (squadId: string, notifId: string) => {
+    setNotifications(prev => prev.map(n => {
+      if (n.id === notifId && n.squadInvitation) {
+        return {
+          ...n,
+          read: true,
+          squadInvitation: {
+            ...n.squadInvitation,
+            status: 'declined',
+          }
+        };
+      }
+      return n;
+    }));
+    showToast(`Squad invitation declined.`);
   };
 
   // Interactions: Toggle Community Join
@@ -772,10 +1037,10 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleOpenCohortDiscussions = (challenge?: Challenge, mode: 'list' | 'detail' = 'list') => {
+  const handleOpenCohortDiscussions = (challenge?: Challenge, mode?: 'list' | 'detail') => {
     if (challenge) {
       setActiveChallenge(challenge);
-      setCohortViewMode(mode);
+      setCohortViewMode(mode || 'detail');
     } else {
       setCohortViewMode('list');
     }
@@ -872,6 +1137,8 @@ export default function App() {
           <ChallengesScreen
             challenges={challenges}
             currentUser={currentUser}
+            squads={squads}
+            allUsers={allCreators}
             onSelectChallenge={handleOpenChallengeDetail}
             onOpenCreateChallenge={() => setIsCreateChallengeOpen(true)}
             onCheckIn={handleIncrementChallenge}
@@ -880,6 +1147,12 @@ export default function App() {
             onAddToTodoList={handleAddToTodoList}
             onToggleFollow={handleToggleFollow}
             toDoChallengeIds={toDoList.filter(t => t.challengeId).map(t => t.challengeId!)}
+            onToggleJoinChallenge={handleToggleJoinChallenge}
+            onCreateSquad={handleCreateSquad}
+            onInviteMemberToSquad={handleInviteMemberToSquad}
+            onEnterChallengeWithSquad={handleEnterChallengeWithSquad}
+            onAcceptSquadEntry={handleAcceptSquadEntry}
+            onAcceptAllSquadEntry={handleAcceptAllSquadEntry}
           />
         );
       case 'create':
@@ -959,6 +1232,7 @@ export default function App() {
             onSelectChallengeCohort={(ch) => setActiveChallenge(ch)}
             onNavigateUser={(user) => handleNavigateToUser(user)}
             onToggleFollow={handleToggleFollow}
+            onAddProof={handleAddCohortProof}
           />
         );
       case 'community_hub':
@@ -1297,6 +1571,8 @@ export default function App() {
           notifications={notifications}
           onClose={() => setIsNotificationsOpen(false)}
           onMarkAllRead={handleMarkAllNotificationsRead}
+          onAcceptSquadInvite={handleAcceptSquadInvite}
+          onDeclineSquadInvite={handleDeclineSquadInvite}
         />
       )}
 
