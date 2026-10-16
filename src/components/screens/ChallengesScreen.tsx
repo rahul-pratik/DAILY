@@ -637,7 +637,7 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
 
                     <button
                       type="button"
-                      onClick={() => onEnterChallengeWithSquad?.(squad.id, squadCh.id)}
+                      onClick={() => onEnterChallengeWithSquad?.(squad.id, squadCh?.id || squad.challengeId || '')}
                       className="px-3.5 py-1.5 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] active:scale-95 text-white text-xs font-bold shadow-md cursor-pointer"
                     >
                       Enter Challenge with Squad
@@ -1060,6 +1060,27 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                 </div>
               );
             })}
+
+            {filteredChallenges.length === 0 && (
+              <div className="py-14 text-center text-[#8A92A6] px-4 bg-[#090C13] rounded-2xl border border-[#1C2230] space-y-3">
+                <Target size={28} className="mx-auto text-[#2166FF] mb-1 opacity-70" />
+                <div>
+                  <p className="text-sm font-semibold text-white mb-0.5">No challenges found</p>
+                  <p className="text-xs text-[#8A92A6]">
+                    {selectedTag !== '#All Tags' 
+                      ? `No challenges tagged under ${selectedTag}.` 
+                      : 'Be the first to launch a new challenge!'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onOpenCreateChallenge}
+                  className="px-4 py-2 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] text-white text-xs font-semibold cursor-pointer shadow-md transition-colors"
+                >
+                  Create New Challenge
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

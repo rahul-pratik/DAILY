@@ -305,10 +305,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         ))}
 
         {filteredPosts.length === 0 && (
-          <div className="py-16 text-center text-[#9298A3] px-4">
-            <Sparkles size={28} className="mx-auto text-[#2166FF] mb-2 opacity-70" />
-            <p className="text-sm font-medium text-white mb-1">No posts found in this feed</p>
-            <p className="text-xs text-[#9298A3]">Show up and be the first to share your work today.</p>
+          <div className="py-16 text-center text-[#9298A3] px-4 space-y-3">
+            <Sparkles size={28} className="mx-auto text-[#2166FF] mb-1 opacity-70" />
+            <div>
+              <p className="text-sm font-semibold text-white mb-0.5">No posts yet in this feed</p>
+              <p className="text-xs text-[#9298A3]">Show up and be the first to share your daily craft.</p>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenCreate}
+              className="px-4 py-2 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] text-white text-xs font-semibold cursor-pointer transition-colors shadow-md shadow-[#2166FF]/20"
+            >
+              Share Your First Post
+            </button>
           </div>
         )}
       </div>

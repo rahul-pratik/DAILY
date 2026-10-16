@@ -378,6 +378,23 @@ export const CommunitiesScreen: React.FC<CommunitiesScreenProps> = ({
             </div>
           );
         })}
+
+        {filteredCommunities.length === 0 && (
+          <div className="py-14 text-center text-[#9298A3] px-4 bg-[#080B10] rounded-2xl border border-[#20242C] space-y-3">
+            <Compass size={28} className="mx-auto text-[#2166FF] mb-1 opacity-70" />
+            <div>
+              <p className="text-sm font-semibold text-white mb-0.5">No communities found</p>
+              <p className="text-xs text-[#9298A3]">Try selecting another topic filter or create your own hub.</p>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenCreateCommunity}
+              className="px-4 py-2 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] text-white text-xs font-semibold cursor-pointer shadow-md transition-colors"
+            >
+              Create Community
+            </button>
+          </div>
+        )}
       </div>
 
       {/* MATCHING CREATORS SECTION */}

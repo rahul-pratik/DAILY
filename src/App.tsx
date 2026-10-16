@@ -4,15 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { 
-  CURRENT_USER, 
-  OTHER_USERS,
-  INITIAL_POSTS, 
-  INITIAL_CHALLENGES, 
-  INITIAL_COMMUNITIES, 
-  INITIAL_NOTIFICATIONS,
-  INITIAL_TODOS
-} from './data/initialData';
+import { OTHER_USERS } from './data/initialData';
 import { Author, Challenge, CohortProof, Community, JoinRequest, NotificationItem, Post, PurposeLabel, ScreenType, Squad, ToDoItem } from './types';
 import { TopHeader } from './components/TopHeader';
 import { Navigation } from './components/Navigation';
@@ -42,6 +34,19 @@ import { StorageService } from './services/storageService';
 import { supabase } from './lib/supabase';
 import { Smartphone, Monitor, Columns } from 'lucide-react';
 
+const defaultGuestUser: Author = {
+  id: 'u_builder',
+  name: 'Daily Builder',
+  username: 'builder',
+  avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+  bio: 'Building daily consistency and verifiable discipline.',
+  isCurrentUser: true,
+  isFollowing: false,
+  followersCount: 0,
+  followingCount: 0,
+  accountabilityHubPrivacy: 'public',
+};
+
 export default function App() {
   // Navigation & Screen state
   const [currentScreen, setCurrentScreen] = useState<ScreenType>('home');
@@ -49,19 +54,20 @@ export default function App() {
   const [cohortViewMode, setCohortViewMode] = useState<'list' | 'detail'>('list');
   const [isOnboardingDone, setIsOnboardingDone] = useState<boolean>(StorageService.isOnboardingCompleted());
 
-  // Application Data States (persisted via StorageService)
-  const [currentUser, setCurrentUser] = useState<Author>(StorageService.getCurrentUser());
-  const [viewingUser, setViewingUser] = useState<Author>(StorageService.getCurrentUser());
-  const [accountabilityHubUser, setAccountabilityHubUser] = useState<Author>(StorageService.getCurrentUser());
-  const [posts, setPosts] = useState<Post[]>(StorageService.getPosts());
-  const [challenges, setChallenges] = useState<Challenge[]>(StorageService.getChallenges());
-  const [communities, setCommunities] = useState<Community[]>(StorageService.getCommunities());
-  const [notifications, setNotifications] = useState<NotificationItem[]>(StorageService.getNotifications());
-  const [allCreators, setAllCreators] = useState<Author[]>(StorageService.getCreators());
-  const [toDoList, setToDoList] = useState<ToDoItem[]>(StorageService.getTodos());
-  const [activeChallenge, setActiveChallenge] = useState<Challenge | null>(INITIAL_CHALLENGES[0]);
-  const [activeCommunity, setActiveCommunity] = useState<Community | null>(INITIAL_COMMUNITIES[0]);
-  const [squads, setSquads] = useState<Squad[]>(StorageService.getSquads());
+  // Application Data States (persisted via StorageService or fetched from Supabase)
+  const [currentUser, setCurrentUser] = useState<Author>(() => StorageService.getCurrentUser() ?? defaultGuestUser);
+  const [viewingUser, setViewingUser] = useState<Author>(() => StorageService.getCurrentUser() ?? defaultGuestUser);
+  const [accountabilityHubUser, setAccountabilityHubUser] = useState<Author>(() => StorageService.getCurrentUser() ?? defaultGuestUser);
+  const [posts, setPosts] = useState<Post[]>(() => StorageService.getPosts() ?? []);
+  const [challenges, setChallenges] = useState<Challenge[]>(() => StorageService.getChallenges() ?? []);
+  const [communities, setCommunities] = useState<Community[]>(() => StorageService.getCommunities() ?? []);
+  const [notifications, setNotifications] = useState<NotificationItem[]>(() => StorageService.getNotifications() ?? []);
+  const [allCreators, setAllCreators] = useState<Author[]>(() => StorageService.getCreators() ?? []);
+  const [toDoList, setToDoList] = useState<ToDoItem[]>(() => StorageService.getTodos() ?? []);
+  const [activeChallenge, setActiveChallenge] = useState<Challenge | null>(null);
+  const [activeCommunity, setActiveCommunity] = useState<Community | null>(null);
+  const [squads, setSquads] = useState<Squad[]>(() => StorageService.getSquads() ?? []);
+  const [isLoadingSupabase, setIsLoadingSupabase] = useState<boolean>(false);
 
   // Modal states
   const [selectedPostForComments, setSelectedPostForComments] = useState<Post | null>(null);
@@ -114,6 +120,163 @@ export default function App() {
     StorageService.saveSquads(squads);
   }, [squads]);
 
+  // Fetch initial empty or saved states from Supabase upon authentication
+  const fetchSupabaseData = async (userAuthId: string) => {
+    setIsLoadingSupabase(true);
+    try {
+      // 1. Fetch user profile from public.profiles
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userAuthId)
+        .maybeSingle();
+
+      if (profile) {
+        const syncedUser: Author = {
+          id: profile.id,
+          name: profile.name || 'Daily Builder',
+          username: profile.username || 'builder',
+          avatar: profile.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+          bio: profile.bio || '',
+          followersCount: profile.followers_count || 0,
+          followingCount: profile.following_count || 0,
+          accountabilityHubPrivacy: (profile.accountability_hub_privacy as 'public' | 'private') || 'public',
+          isCurrentUser: true,
+        };
+        setCurrentUser(syncedUser);
+        setViewingUser(syncedUser);
+        StorageService.saveCurrentUser(syncedUser);
+      }
+
+      // 2. Fetch posts from public.posts
+      const { data: dbPosts, error: postsErr } = await supabase
+        .from('posts')
+        .select('*, author:profiles(*)')
+        .order('created_at', { ascending: false });
+
+      if (!postsErr && dbPosts) {
+        const mappedPosts: Post[] = dbPosts.map((p: any) => ({
+          id: p.id,
+          author: {
+            id: p.author?.id || p.author_id,
+            name: p.author?.name || 'Creator',
+            username: p.author?.username || 'creator',
+            avatar: p.author?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+            isCurrentUser: p.author?.id === userAuthId,
+          },
+          content: p.content,
+          purpose: p.purpose,
+          timestamp: new Date(p.created_at).toLocaleDateString(),
+          likesCount: p.likes_count || 0,
+          commentsCount: p.comments_count || 0,
+          isLiked: false,
+          isSaved: false,
+          mediaUrls: p.media_urls || [],
+          mediaUrl: p.media_urls?.[0],
+          mediaType: p.media_type === 'none' ? undefined : p.media_type,
+        }));
+        setPosts(mappedPosts);
+        StorageService.savePosts(mappedPosts);
+      } else if (!postsErr && !dbPosts) {
+        setPosts([]);
+        StorageService.savePosts([]);
+      }
+
+      // 3. Fetch challenges from public.challenges
+      const { data: dbChallenges, error: chErr } = await supabase
+        .from('challenges')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!chErr && dbChallenges) {
+        const mappedChallenges: Challenge[] = dbChallenges.map((c: any) => ({
+          id: c.id,
+          title: c.title,
+          description: c.description,
+          whatYouPerform: c.what_you_perform,
+          category: c.category,
+          type: c.type,
+          current: 0,
+          target: c.target,
+          unit: c.unit,
+          durationDays: c.duration_days,
+          maxSquadSize: c.max_squad_size,
+          tags: c.tags || [],
+          icon: c.icon,
+          status: c.status,
+          joined: false,
+        }));
+        setChallenges(mappedChallenges);
+        StorageService.saveChallenges(mappedChallenges);
+      } else if (!chErr && !dbChallenges) {
+        setChallenges([]);
+        StorageService.saveChallenges([]);
+      }
+
+      // 4. Fetch communities from public.communities
+      const { data: dbCommunities, error: commErr } = await supabase
+        .from('communities')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!commErr && dbCommunities) {
+        const mappedCommunities: Community[] = dbCommunities.map((cm: any) => ({
+          id: cm.id,
+          name: cm.name,
+          description: cm.description,
+          icon: cm.icon || 'code',
+          accentColor: cm.accent_color || '#2166FF',
+          membersCount: cm.members_count || 1,
+          isJoined: false,
+          category: cm.category,
+          isPublic: cm.is_public ?? true,
+          tags: cm.tags || [],
+          creator: {
+            id: cm.creator_id || 'creator',
+            name: 'Community Founder',
+            username: 'founder',
+            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+          },
+          coverUrl: cm.cover_url,
+          guidelines: cm.guidelines || [],
+        }));
+        setCommunities(mappedCommunities);
+        StorageService.saveCommunities(mappedCommunities);
+      } else if (!commErr && !dbCommunities) {
+        setCommunities([]);
+        StorageService.saveCommunities([]);
+      }
+
+      // 5. Fetch todos for this user
+      const { data: dbTodos, error: todosErr } = await supabase
+        .from('todos')
+        .select('*')
+        .eq('user_id', userAuthId)
+        .order('created_at', { ascending: false });
+
+      if (!todosErr && dbTodos) {
+        const mappedTodos: ToDoItem[] = dbTodos.map((t: any) => ({
+          id: t.id,
+          challengeId: t.challenge_id || '',
+          title: t.title,
+          targetUnit: t.target_unit,
+          scheduledDate: t.scheduled_date,
+          completed: t.completed,
+          category: t.category,
+        }));
+        setToDoList(mappedTodos);
+        StorageService.saveTodos(mappedTodos);
+      } else if (!todosErr && !dbTodos) {
+        setToDoList([]);
+        StorageService.saveTodos([]);
+      }
+    } catch (e) {
+      console.warn('Supabase query exception (proceeding with clean local state):', e);
+    } finally {
+      setIsLoadingSupabase(false);
+    }
+  };
+
   // Listen for Supabase session and auth state changes
   React.useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -142,6 +305,7 @@ export default function App() {
           email: u.email,
         });
         setIsOnboardingDone(true);
+        fetchSupabaseData(u.id);
       }
     });
 
@@ -171,6 +335,7 @@ export default function App() {
           email: u.email,
         });
         setIsOnboardingDone(true);
+        fetchSupabaseData(u.id);
         showToast(`Authenticated with Supabase as ${derivedName}!`);
       } else if (event === 'SIGNED_OUT') {
         StorageService.setOnboardingCompleted(false);
@@ -1180,7 +1345,28 @@ export default function App() {
       StorageService.setAuthSession(authSession);
     }
     setIsOnboardingDone(true);
-    showToast(`Welcome, ${newUser.name}! Profile saved & ready for Supabase sync.`);
+
+    // Check if the user is authenticated with Supabase to fetch initial data or start fresh immediately
+    if (newUser.id && !newUser.id.startsWith('user_')) {
+      fetchSupabaseData(newUser.id);
+    } else {
+      // Start fresh with clean empty state immediately
+      setPosts([]);
+      setChallenges([]);
+      setCommunities([]);
+      setToDoList([]);
+      setNotifications([]);
+      setSquads([]);
+      setActiveChallenge(null);
+      setActiveCommunity(null);
+      StorageService.savePosts([]);
+      StorageService.saveChallenges([]);
+      StorageService.saveCommunities([]);
+      StorageService.saveTodos([]);
+      StorageService.saveNotifications([]);
+      StorageService.saveSquads([]);
+    }
+    showToast(`Welcome, ${newUser.name}! Fresh account ready.`);
   };
 
   const handleResetToFreshData = () => {
@@ -1193,7 +1379,13 @@ export default function App() {
     setCurrentUser(cleanUser);
     setViewingUser(cleanUser);
     setPosts([]);
+    setChallenges([]);
+    setCommunities([]);
     setToDoList([]);
+    setNotifications([]);
+    setSquads([]);
+    setActiveChallenge(null);
+    setActiveCommunity(null);
     showToast('Clean slate active! You can now feed and save fresh real data.');
   };
 
@@ -1304,10 +1496,24 @@ export default function App() {
             onToggleHubPrivacy={handleToggleHubPrivacy}
           />
         );
-      case 'cohort_discussions':
+      case 'cohort_discussions': {
+        const targetCohort = activeChallenge || challenges[0];
+        if (!targetCohort) {
+          return (
+            <div className="py-20 text-center px-4">
+              <p className="text-sm font-semibold text-white mb-2">No Challenges Active</p>
+              <button
+                onClick={() => handleSelectScreen('challenges')}
+                className="px-4 py-2 rounded-xl bg-[#2166FF] text-white text-xs font-semibold cursor-pointer"
+              >
+                Explore Challenges
+              </button>
+            </div>
+          );
+        }
         return (
           <CohortDiscussionsScreen
-            challenge={activeChallenge || challenges[0]}
+            challenge={targetCohort}
             challenges={challenges}
             currentUser={currentUser}
             initialViewMode={cohortViewMode}
@@ -1318,10 +1524,25 @@ export default function App() {
             onAddProof={handleAddCohortProof}
           />
         );
-      case 'community_hub':
+      }
+      case 'community_hub': {
+        const targetCommunity = activeCommunity || communities[0];
+        if (!targetCommunity) {
+          return (
+            <div className="py-20 text-center px-4">
+              <p className="text-sm font-semibold text-white mb-2">No Communities Found</p>
+              <button
+                onClick={() => handleSelectScreen('communities')}
+                className="px-4 py-2 rounded-xl bg-[#2166FF] text-white text-xs font-semibold cursor-pointer"
+              >
+                Browse Communities
+              </button>
+            </div>
+          );
+        }
         return (
           <CommunityHubScreen
-            community={activeCommunity || communities[0]}
+            community={targetCommunity}
             currentUser={currentUser}
             onBack={() => handleSelectScreen(previousScreen === 'community_hub' ? 'communities' : previousScreen)}
             onNavigateUser={(user) => handleNavigateToUser(user)}
@@ -1333,20 +1554,36 @@ export default function App() {
             onOpenShare={(post) => setSelectedPostForShare(post)}
           />
         );
-      case 'challenge_detail':
+      }
+      case 'challenge_detail': {
+        const targetCh = activeChallenge || challenges[0];
+        if (!targetCh) {
+          return (
+            <div className="py-20 text-center px-4">
+              <p className="text-sm font-semibold text-white mb-2">Challenge Not Found</p>
+              <button
+                onClick={() => handleSelectScreen('challenges')}
+                className="px-4 py-2 rounded-xl bg-[#2166FF] text-white text-xs font-semibold cursor-pointer"
+              >
+                Back to Challenges
+              </button>
+            </div>
+          );
+        }
         return (
           <ChallengeDetailScreen
-            challenge={activeChallenge || challenges[0]}
+            challenge={targetCh}
             currentUser={currentUser}
             onBack={() => handleSelectScreen(previousScreen === 'challenge_detail' ? 'challenges' : previousScreen)}
             onCheckInWithProof={handleCheckInWithProof}
             onAddToTodoList={handleAddToTodoList}
-            onOpenCohortChat={() => handleOpenCohortDiscussions(activeChallenge || challenges[0])}
+            onOpenCohortChat={() => handleOpenCohortDiscussions(targetCh)}
             onToggleJoin={handleToggleJoinChallenge}
             onRestartChallenge={handleRestartChallenge}
-            isInTodoList={toDoList.some((t) => t.challengeId === (activeChallenge?.id || challenges[0].id))}
+            isInTodoList={toDoList.some((t) => t.challengeId === targetCh.id)}
           />
         );
+      }
       case 'my_joined_communities':
         return (
           <JoinedCommunitiesScreen
