@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   ArrowRight, 
   ChevronLeft, 
@@ -10,10 +10,15 @@ import {
   Loader2,
   CheckCircle2,
   Sparkles,
-  KeyRound
+  KeyRound,
+  Eye,
+  EyeOff,
+  Check,
+  ShieldCheck
 } from 'lucide-react';
 import { Author } from '../../types';
 import { supabase } from '../../lib/supabase';
+import { OTHER_USERS } from '../../data/initialData';
 
 interface OnboardingAuthScreenProps {
   onComplete: (user: Author, selectedInterests: string[], authSession?: { provider: 'google' | 'email' | 'guest'; email?: string }) => void;
@@ -32,17 +37,147 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
   const [authMode, setAuthMode] = useState<'signup' | 'login'>('signup');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authSuccessMessage, setAuthSuccessMessage] = useState<string | null>(null);
   const [appleAlert, setAppleAlert] = useState(false);
   const [authProvider, setAuthProvider] = useState<'google' | 'email' | 'guest'>('email');
 
-  // Screen 2: Name, username, bio state
+  // Screen 2: Name, username, bio, avatar state
   const [name, setName] = useState(initialUser?.name || '');
   const [username, setUsername] = useState(initialUser?.username || '');
   const [bio, setBio] = useState(initialUser?.bio || '');
+  const [avatarUrl, setAvatarUrl] = useState<string>(
+    initialUser?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80'
+  );
   const [userId, setUserId] = useState<string>(initialUser?.id || `user_${Date.now()}`);
+  const [googleUserNote, setGoogleUserNote] = useState<string | null>(null);
+
+  // Real-time unique username validation state
+  const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'available' | 'taken' | 'invalid'>('idle');
+  const [usernameMessage, setUsernameMessage] = useState<string | null>(null);
+  const checkTimeoutRef = useRef<any>(null);
+
+  // Reserved usernames list (system handles & known creators)
+  const reservedUsernames = new Set([
+    'admin', 'daily', 'builder', 'official', 'support', 'help', 'system', 'root', 'bot',
+    ...Object.keys(OTHER_USERS).map((u) => u.toLowerCase()),
+    ...Object.values(OTHER_USERS).map((u) => u.username.toLowerCase())
+  ]);
+
+  // Check if user is already authenticated via Supabase session (e.g. redirected from Google OAuth)
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        const u = session.user;
+        setUserId(u.id);
+        const meta = u.user_metadata || {};
+        const derivedName = meta.name || meta.full_name || u.email?.split('@')[0] || '';
+        const rawHandle = meta.username || u.email?.split('@')[0]?.toLowerCase().replace(/[^a-z0-9_.]/g, '') || '';
+        const derivedAvatar = meta.avatar_url || '';
+        const provider = (u.app_metadata?.provider as any) || 'google';
+
+        if (derivedName) setName(derivedName);
+        if (derivedAvatar) setAvatarUrl(derivedAvatar);
+        setEmail(u.email || '');
+        setAuthProvider(provider);
+
+        if (provider === 'google' || u.app_metadata?.provider === 'google') {
+          setGoogleUserNote(`Google account verified (${u.email}). Pick your unique handle below to complete setup.`);
+        }
+
+        if (rawHandle) {
+          setUsername(rawHandle);
+          checkUsernameAvailability(rawHandle, u.id);
+        }
+
+        // Advance to Screen 2 to prompt for custom Name, Username, and Bio
+        setScreen(2);
+      }
+    });
+  }, []);
+
+  // Validate unique username against local reserved list and Supabase public.profiles
+  const checkUsernameAvailability = async (candidate: string, currentUserId?: string) => {
+    const clean = candidate.trim().toLowerCase().replace(/^@/, '');
+    if (!clean) {
+      setUsernameStatus('idle');
+      setUsernameMessage(null);
+      return;
+    }
+
+    if (clean.length < 3) {
+      setUsernameStatus('invalid');
+      setUsernameMessage('Username must be at least 3 characters.');
+      return;
+    }
+
+    if (!/^[a-z0-9_.]+$/.test(clean)) {
+      setUsernameStatus('invalid');
+      setUsernameMessage('Only lowercase letters, numbers, underscores (_), and dots (.) are allowed.');
+      return;
+    }
+
+    // Check system reserved handles & known mock creators
+    if (reservedUsernames.has(clean)) {
+      setUsernameStatus('taken');
+      setUsernameMessage(`@${clean} is reserved or already taken. Please choose another.`);
+      return;
+    }
+
+    setUsernameStatus('checking');
+    setUsernameMessage('Checking availability...');
+
+    try {
+      const activeId = currentUserId || userId;
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, username')
+        .ilike('username', clean)
+        .limit(1);
+
+      if (error) {
+        // Table may be empty or not yet seeded; treat as available
+        setUsernameStatus('available');
+        setUsernameMessage(`@${clean} is available!`);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        if (data[0].id === activeId) {
+          setUsernameStatus('available');
+          setUsernameMessage(`@${clean} is your current username.`);
+        } else {
+          setUsernameStatus('taken');
+          setUsernameMessage(`@${clean} is already taken by another user. Please choose another.`);
+        }
+      } else {
+        setUsernameStatus('available');
+        setUsernameMessage(`@${clean} is available!`);
+      }
+    } catch (e) {
+      setUsernameStatus('available');
+      setUsernameMessage(`@${clean} is available!`);
+    }
+  };
+
+  const handleUsernameChange = (val: string) => {
+    const clean = val.toLowerCase().replace(/[^a-z0-9_.]/g, '');
+    setUsername(clean);
+
+    if (checkTimeoutRef.current) clearTimeout(checkTimeoutRef.current);
+    if (!clean) {
+      setUsernameStatus('idle');
+      setUsernameMessage(null);
+      return;
+    }
+
+    setUsernameStatus('checking');
+    checkTimeoutRef.current = setTimeout(() => {
+      checkUsernameAvailability(clean, userId);
+    }, 300);
+  };
 
   // Handle Google OAuth via Supabase
   const handleGoogleLogin = async () => {
@@ -60,7 +195,6 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
       });
 
       if (error) {
-        // If Google provider is not yet enabled in the user's Supabase dashboard
         if (
           error.message?.toLowerCase().includes('not enabled') || 
           error.message?.toLowerCase().includes('unsupported provider')
@@ -112,31 +246,21 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
         if (data?.user) {
           const u = data.user;
           const derivedName = u.user_metadata?.name || u.user_metadata?.full_name || email.split('@')[0];
-          const derivedUsername = u.user_metadata?.username || email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+          const derivedUsername = u.user_metadata?.username || email.split('@')[0].toLowerCase().replace(/[^a-z0-9_.]/g, '');
 
-          const finalUser: Author = {
-            id: u.id,
-            name: derivedName,
-            username: derivedUsername,
-            avatar: u.user_metadata?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-            bio: u.user_metadata?.bio || 'Building daily consistency and verifiable discipline.',
-            isCurrentUser: true,
-            isFollowing: false,
-            followersCount: 1,
-            followingCount: 2,
-            accountabilityHubPrivacy: 'public',
-          };
-
-          onComplete(finalUser, ['Coding & Tech', 'Startups & SaaS', 'Daily Habits'], {
-            provider: 'email',
-            email: email.trim(),
-          });
+          setUserId(u.id);
+          setName(derivedName);
+          setUsername(derivedUsername);
+          checkUsernameAvailability(derivedUsername, u.id);
+          // Advance to Screen 2 to let the user review and confirm handle
+          setScreen(2);
+          setAuthLoading(false);
           return;
         }
       } else {
         // Sign up mode
         const derivedName = name.trim() || (email.split('@')[0].charAt(0).toUpperCase() + email.split('@')[0].slice(1));
-        const derivedUsername = username.trim().replace(/^@/, '') || email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+        const derivedUsername = username.trim().replace(/^@/, '') || email.split('@')[0].toLowerCase().replace(/[^a-z0-9_.]/g, '');
 
         const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
@@ -160,6 +284,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
           setUserId(data.user.id);
           setName(derivedName);
           setUsername(derivedUsername);
+          checkUsernameAvailability(derivedUsername, data.user.id);
           setScreen(2);
         } else if (data?.user) {
           // Email confirmation is required by Supabase project settings
@@ -209,38 +334,78 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
     }
   };
 
-  // Screen 2: Finish Onboarding
+  // Screen 2: Finish Onboarding & Save Unique Profile
   const handleFinish = async (e: React.FormEvent) => {
     e.preventDefault();
-    setAuthLoading(true);
 
     const finalName = name.trim() || 'Daily Builder';
-    const finalUsername = username.trim().replace(/^@/, '') || 'builder';
+    const finalUsername = username.trim().toLowerCase().replace(/^@/, '');
     const finalBio = bio.trim() || 'Building daily consistency and verifiable discipline.';
 
+    if (!finalUsername) {
+      setAuthError('Please choose a valid username handle.');
+      return;
+    }
+
+    if (usernameStatus === 'taken' || usernameStatus === 'invalid') {
+      setAuthError(usernameMessage || 'Please choose an available username.');
+      return;
+    }
+
+    setAuthLoading(true);
+    setAuthError(null);
+
     try {
-      // Update user metadata in Supabase if logged in
+      // Re-verify uniqueness against public.profiles right before saving
+      const { data: existingUser } = await supabase
+        .from('profiles')
+        .select('id, username')
+        .ilike('username', finalUsername)
+        .limit(1);
+
+      if (existingUser && existingUser.length > 0 && existingUser[0].id !== userId) {
+        setUsernameStatus('taken');
+        setUsernameMessage(`@${finalUsername} is already taken by someone else.`);
+        setAuthError(`Username @${finalUsername} is already taken. Please choose another.`);
+        setAuthLoading(false);
+        return;
+      }
+
+      // Upsert profile in Supabase database
+      const finalAvatar = avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80';
+      await supabase.from('profiles').upsert({
+        id: userId,
+        username: finalUsername,
+        name: finalName,
+        avatar_url: finalAvatar,
+        bio: finalBio,
+        updated_at: new Date().toISOString()
+      });
+
+      // Update user metadata in Supabase Auth
       await supabase.auth.updateUser({
         data: {
           name: finalName,
           username: finalUsername,
           bio: finalBio,
+          avatar_url: finalAvatar,
+          onboarding_completed: true,
         },
       });
-    } catch (err) {
-      // Non-fatal
+    } catch (err: any) {
+      console.warn('Profile sync notice:', err);
     }
 
     const finalUser: Author = {
       id: userId || initialUser?.id || `user_${Date.now()}`,
       name: finalName,
       username: finalUsername,
-      avatar: initialUser?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+      avatar: avatarUrl,
       bio: finalBio,
       isCurrentUser: true,
       isFollowing: false,
-      followersCount: 1,
-      followingCount: 2,
+      followersCount: 0,
+      followingCount: 0,
       accountabilityHubPrivacy: 'public',
     };
 
@@ -252,49 +417,42 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-[#07090E] text-white flex flex-col justify-center items-center px-4 py-8 font-sans">
-      <div className="w-full max-w-sm flex flex-col space-y-6">
+    <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-4 relative overflow-hidden">
+      {/* Background Glow */}
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-[#2166FF]/15 rounded-full blur-3xl pointer-events-none" />
+
+      {/* Main Card */}
+      <div className="w-full max-w-md bg-[#080B10] border border-[#20242C] rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10 backdrop-blur-xl">
         
-        {/* Step Indicator */}
-        <div className="flex items-center justify-between pb-2">
-          {screen > 1 ? (
+        {/* Step indicator */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-extrabold tracking-wider text-white">
+              DAILY<span className="text-[#2166FF]">.</span>
+            </span>
+            <span className="text-[10px] font-mono text-[#9298A3] bg-[#121620] px-2 py-0.5 rounded-full border border-[#20242C]">
+              Step {screen} of 2
+            </span>
+          </div>
+
+          {screen === 2 && (
             <button
               type="button"
               onClick={() => setScreen(1)}
-              className="text-xs text-[#8A92A6] hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
+              className="text-xs text-[#9298A3] hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
             >
-              <ChevronLeft size={16} />
-              <span>Back</span>
+              <ChevronLeft size={14} />
+              <span>Back to Login</span>
             </button>
-          ) : (
-            <div className="w-8" />
           )}
-
-          <div className="flex items-center gap-2">
-            {[1, 2].map((stepNum) => (
-              <div
-                key={stepNum}
-                className={`h-1.5 rounded-full transition-all duration-200 ${
-                  stepNum === screen
-                    ? 'w-7 bg-[#2166FF]'
-                    : 'w-2 bg-[#1C2230]'
-                }`}
-              />
-            ))}
-          </div>
-
-          <span className="text-[11px] font-mono text-[#8A92A6]">
-            {screen}/2
-          </span>
         </div>
 
         {/* ================= SCREEN 1: LOGIN / SIGNUP ================= */}
         {screen === 1 && (
           <div className="space-y-5 animate-fade-in">
             <div className="text-center space-y-1">
-              <h1 className="text-2xl font-bold tracking-tight text-white flex items-center justify-center gap-1.5">
-                <span>DAILY</span>
-                <span className="text-[#2166FF]">.</span>
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
+                {authMode === 'signup' ? 'Create Your Account' : 'Welcome Back'}
               </h1>
               <p className="text-xs text-[#8A92A6]">
                 Show up daily. Track verified accountability.
@@ -313,7 +471,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                 <button
                   type="button"
                   onClick={() => setAuthError(null)}
-                  className="text-xs text-red-400 hover:text-white"
+                  className="text-xs text-red-400 hover:text-white cursor-pointer"
                 >
                   ✕
                 </button>
@@ -332,7 +490,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                 <button
                   type="button"
                   onClick={() => setAuthSuccessMessage(null)}
-                  className="text-xs text-emerald-400 hover:text-white"
+                  className="text-xs text-emerald-400 hover:text-white cursor-pointer"
                 >
                   ✕
                 </button>
@@ -351,7 +509,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                 <button
                   type="button"
                   onClick={() => setAppleAlert(false)}
-                  className="text-xs text-amber-400 hover:text-white"
+                  className="text-xs text-amber-400 hover:text-white cursor-pointer"
                 >
                   ✕
                 </button>
@@ -364,7 +522,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                 type="button"
                 disabled={authLoading}
                 onClick={handleGoogleLogin}
-                className="w-full py-2.5 px-4 rounded-xl bg-[#121620] hover:bg-[#1A2030] disabled:opacity-50 border border-[#202738] text-xs font-semibold text-white flex items-center justify-center gap-2.5 transition-colors cursor-pointer"
+                className="w-full py-2.5 px-4 rounded-xl bg-[#121620] hover:bg-[#1A2030] disabled:opacity-50 border border-[#202738] text-xs font-semibold text-white flex items-center justify-center gap-2.5 transition-colors cursor-pointer shadow-sm"
               >
                 {authLoading && authProvider === 'google' ? (
                   <Loader2 size={16} className="animate-spin text-[#3B82FF]" />
@@ -438,6 +596,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                 </button>
               </div>
 
+              {/* Email Input */}
               <div className="relative">
                 <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#555E70]" />
                 <input
@@ -450,17 +609,27 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                 />
               </div>
 
+              {/* Password Input with Show/Hide Toggle */}
               <div className="relative">
                 <Lock size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#555E70]" />
                 <input
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   required
                   minLength={6}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Password (minimum 6 characters)"
-                  className="w-full pl-9 pr-3 py-2.5 bg-[#121620] border border-[#202738] focus:border-[#2166FF] rounded-xl text-xs text-white placeholder-[#555E70] outline-none transition-colors"
+                  className="w-full pl-9 pr-10 py-2.5 bg-[#121620] border border-[#202738] focus:border-[#2166FF] rounded-xl text-xs text-white placeholder-[#555E70] outline-none transition-colors"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#555E70] hover:text-white transition-colors cursor-pointer p-0.5"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
               </div>
 
               <button
@@ -510,20 +679,60 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
           </div>
         )}
 
-        {/* ================= SCREEN 2: NAME, USERNAME, BIO ================= */}
+        {/* ================= SCREEN 2: NAME, UNIQUE USERNAME, BIO ================= */}
         {screen === 2 && (
-          <form onSubmit={handleFinish} className="space-y-5 animate-fade-in">
+          <form onSubmit={handleFinish} className="space-y-4 animate-fade-in">
             <div className="text-center space-y-1">
               <h2 className="text-xl font-bold tracking-tight text-white flex items-center justify-center gap-1.5">
-                <span>Profile Setup</span>
+                <span>Customize Your Profile</span>
                 <Sparkles size={16} className="text-[#3B82FF]" />
               </h2>
               <p className="text-xs text-[#8A92A6]">
-                Set your public builder name, handle, and bio.
+                Choose your public name, unique handle, and daily bio.
               </p>
             </div>
 
+            {/* Google Verified Banner */}
+            {googleUserNote && (
+              <div className="p-2.5 rounded-xl bg-[#2166FF]/10 border border-[#2166FF]/25 flex items-center gap-2 text-xs text-[#60A5FA]">
+                <ShieldCheck size={16} className="text-[#3B82FF] shrink-0" />
+                <span className="truncate">{googleUserNote}</span>
+              </div>
+            )}
+
+            {/* Error Message Alert */}
+            {authError && (
+              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 flex items-start gap-2.5">
+                <AlertCircle size={15} className="text-red-400 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-red-200 leading-relaxed break-words">
+                    {authError}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Avatar Preview */}
+            <div className="flex items-center gap-3 p-3 rounded-2xl bg-[#121620] border border-[#202738]">
+              <img
+                src={avatarUrl}
+                alt="Avatar"
+                className="w-12 h-12 rounded-full object-cover border-2 border-[#2166FF]"
+                referrerPolicy="no-referrer"
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-white truncate">{name || 'Your Name'}</p>
+                <p className="text-[11px] font-mono text-[#3B82FF] truncate">
+                  @{username || 'handle'}
+                </p>
+                <p className="text-[10px] text-[#717B90]">
+                  {authProvider === 'google' ? 'Google Account Avatar' : 'Default Builder Avatar'}
+                </p>
+              </div>
+            </div>
+
             <div className="space-y-3">
+              {/* Display Name */}
               <div>
                 <label className="text-[11px] font-semibold text-[#8A92A6] block mb-1">
                   Display Name
@@ -537,7 +746,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                     onChange={(e) => {
                       setName(e.target.value);
                       if (!username) {
-                        setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ''));
+                        handleUsernameChange(e.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, ''));
                       }
                     }}
                     placeholder="e.g. Alex Chen"
@@ -546,32 +755,86 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                 </div>
               </div>
 
+              {/* Unique Username Handle Field */}
               <div>
-                <label className="text-[11px] font-semibold text-[#8A92A6] block mb-1">
-                  Username Handle
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-semibold text-[#8A92A6]">
+                    Username Handle <span className="text-[#3B82FF]">*Unique</span>
+                  </label>
+                  {usernameStatus === 'checking' && (
+                    <span className="text-[10px] text-[#3B82FF] flex items-center gap-1 font-mono">
+                      <Loader2 size={11} className="animate-spin" />
+                      Checking...
+                    </span>
+                  )}
+                  {usernameStatus === 'available' && (
+                    <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-mono font-bold">
+                      <Check size={11} />
+                      Available
+                    </span>
+                  )}
+                  {usernameStatus === 'taken' && (
+                    <span className="text-[10px] text-red-400 flex items-center gap-1 font-mono font-bold">
+                      ✕ Taken
+                    </span>
+                  )}
+                </div>
+
                 <div className="relative">
                   <AtSign size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#555E70]" />
                   <input
                     type="text"
                     required
                     value={username}
-                    onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.]/g, ''))}
+                    onChange={(e) => handleUsernameChange(e.target.value)}
                     placeholder="username"
-                    className="w-full pl-9 pr-3 py-2.5 bg-[#121620] border border-[#202738] focus:border-[#2166FF] rounded-xl text-xs text-white font-mono placeholder-[#555E70] outline-none transition-colors"
+                    className={`w-full pl-9 pr-8 py-2.5 bg-[#121620] border rounded-xl text-xs text-white font-mono placeholder-[#555E70] outline-none transition-colors ${
+                      usernameStatus === 'available'
+                        ? 'border-emerald-500/60 focus:border-emerald-500'
+                        : usernameStatus === 'taken' || usernameStatus === 'invalid'
+                        ? 'border-red-500/60 focus:border-red-500'
+                        : 'border-[#202738] focus:border-[#2166FF]'
+                    }`}
                   />
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                    {usernameStatus === 'checking' && (
+                      <Loader2 size={13} className="animate-spin text-[#3B82FF]" />
+                    )}
+                    {usernameStatus === 'available' && (
+                      <CheckCircle2 size={14} className="text-emerald-400" />
+                    )}
+                    {(usernameStatus === 'taken' || usernameStatus === 'invalid') && (
+                      <AlertCircle size={14} className="text-red-400" />
+                    )}
+                  </div>
                 </div>
+
+                {/* Validation helper message */}
+                {usernameMessage && (
+                  <p
+                    className={`text-[10px] mt-1 font-mono ${
+                      usernameStatus === 'available'
+                        ? 'text-emerald-400'
+                        : usernameStatus === 'taken' || usernameStatus === 'invalid'
+                        ? 'text-red-400'
+                        : 'text-[#8A92A6]'
+                    }`}
+                  >
+                    {usernameMessage}
+                  </p>
+                )}
               </div>
 
+              {/* Bio & Consistency Goal */}
               <div>
                 <label className="text-[11px] font-semibold text-[#8A92A6] block mb-1">
                   Bio & Consistency Goal
                 </label>
                 <textarea
-                  rows={3}
+                  rows={2}
                   value={bio}
                   onChange={(e) => setBio(e.target.value.slice(0, 160))}
-                  placeholder="What are you building or practicing daily?"
+                  placeholder="What craft or daily practice are you committing to?"
                   className="w-full p-3 bg-[#121620] border border-[#202738] focus:border-[#2166FF] rounded-xl text-xs text-white placeholder-[#555E70] outline-none transition-colors resize-none leading-relaxed"
                 />
               </div>
@@ -579,14 +842,21 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
 
             <button
               type="submit"
-              disabled={authLoading || !name.trim() || !username.trim()}
+              disabled={
+                authLoading || 
+                !name.trim() || 
+                !username.trim() || 
+                usernameStatus === 'taken' || 
+                usernameStatus === 'invalid' || 
+                usernameStatus === 'checking'
+              }
               className="w-full py-2.5 rounded-xl bg-[#2166FF] hover:bg-[#1A52CC] disabled:opacity-40 text-xs font-semibold text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-md shadow-[#2166FF]/20"
             >
               {authLoading ? (
                 <Loader2 size={15} className="animate-spin text-white" />
               ) : (
                 <>
-                  <span>Launch Application</span>
+                  <span>Complete Setup & Launch</span>
                   <ArrowRight size={14} />
                 </>
               )}

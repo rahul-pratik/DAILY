@@ -284,7 +284,7 @@ export default function App() {
         const u = session.user;
         const meta = u.user_metadata || {};
         const derivedName = meta.name || meta.full_name || u.email?.split('@')[0] || 'Daily Builder';
-        const derivedUsername = meta.username || u.email?.split('@')[0]?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'builder';
+        const derivedUsername = meta.username || u.email?.split('@')[0]?.toLowerCase().replace(/[^a-z0-9_.]/g, '') || 'builder';
         const derivedAvatar = meta.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80';
 
         const authUser: Author = {
@@ -299,13 +299,22 @@ export default function App() {
         setCurrentUser(authUser);
         setViewingUser(authUser);
         StorageService.saveCurrentUser(authUser);
-        StorageService.setOnboardingCompleted(true);
         StorageService.setAuthSession({
           provider: (u.app_metadata?.provider as any) || 'email',
           email: u.email,
         });
-        setIsOnboardingDone(true);
-        fetchSupabaseData(u.id);
+
+        // Check if user has already completed onboarding profile setup
+        const hasCompletedOnboarding = StorageService.isOnboardingCompleted() || meta.onboarding_completed === true;
+        if (hasCompletedOnboarding) {
+          StorageService.setOnboardingCompleted(true);
+          setIsOnboardingDone(true);
+          fetchSupabaseData(u.id);
+        } else {
+          // Keep onboarding active so Google login presents Screen 2 for choosing name & unique handle
+          StorageService.setOnboardingCompleted(false);
+          setIsOnboardingDone(false);
+        }
       }
     });
 
@@ -314,7 +323,7 @@ export default function App() {
         const u = session.user;
         const meta = u.user_metadata || {};
         const derivedName = meta.name || meta.full_name || u.email?.split('@')[0] || 'Daily Builder';
-        const derivedUsername = meta.username || u.email?.split('@')[0]?.toLowerCase().replace(/[^a-z0-9]/g, '') || 'builder';
+        const derivedUsername = meta.username || u.email?.split('@')[0]?.toLowerCase().replace(/[^a-z0-9_.]/g, '') || 'builder';
         const derivedAvatar = meta.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80';
 
         const authUser: Author = {
@@ -329,14 +338,23 @@ export default function App() {
         setCurrentUser(authUser);
         setViewingUser(authUser);
         StorageService.saveCurrentUser(authUser);
-        StorageService.setOnboardingCompleted(true);
         StorageService.setAuthSession({
           provider: (u.app_metadata?.provider as any) || 'email',
           email: u.email,
         });
-        setIsOnboardingDone(true);
-        fetchSupabaseData(u.id);
-        showToast(`Authenticated with Supabase as ${derivedName}!`);
+
+        const hasCompletedOnboarding = StorageService.isOnboardingCompleted() || meta.onboarding_completed === true;
+        if (hasCompletedOnboarding) {
+          StorageService.setOnboardingCompleted(true);
+          setIsOnboardingDone(true);
+          fetchSupabaseData(u.id);
+          showToast(`Authenticated with Supabase as ${derivedName}!`);
+        } else {
+          // Keep onboarding active so user completes Screen 2 (name, handle, bio)
+          StorageService.setOnboardingCompleted(false);
+          setIsOnboardingDone(false);
+          showToast(`Signed in with Google! Set your unique handle to finalize.`);
+        }
       } else if (event === 'SIGNED_OUT') {
         StorageService.setOnboardingCompleted(false);
         setIsOnboardingDone(false);

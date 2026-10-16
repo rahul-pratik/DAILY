@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { Author, Challenge, CohortProof, Community, CommunityPost, ToDoItem } from '../../types';
 import { INITIAL_COMMUNITY_WRITINGS } from '../../data/initialData';
+import { StreakAnalytics } from '../StreakAnalytics';
 
 interface AccountabilityHubScreenProps {
   currentUser: Author;
@@ -316,6 +317,13 @@ export const AccountabilityHubScreen: React.FC<AccountabilityHubScreenProps> = (
           </button>
         </div>
       )}
+
+      {/* Streak Analytics Component: Visualizes Daily Check-in Streaks using Bar Chart */}
+      <StreakAnalytics
+        challenges={allChallenges.length > 0 ? allChallenges : completedChallenges}
+        currentUser={targetUser}
+        onSelectChallenge={onSelectChallenge}
+      />
 
       {/* Sleek Minimal 3-Tab Navigator */}
       <div className="grid grid-cols-3 gap-1.5 p-1.5 bg-[#090C12] border border-[#1E232F] rounded-2xl mb-5 shadow-sm">
