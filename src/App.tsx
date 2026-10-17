@@ -31,7 +31,7 @@ import { CreateCommunityModal } from './components/modals/CreateCommunityModal';
 import { ShareModal } from './components/modals/ShareModal';
 import { OnboardingAuthScreen } from './components/screens/OnboardingAuthScreen';
 import { StorageService } from './services/storageService';
-import { supabase, isValidUUID, getSafeUUID, syncProfileToSupabase } from './lib/supabase';
+import { supabase, isValidUUID, getSafeUUID, syncProfileToSupabase, uploadMediaToSupabase } from './lib/supabase';
 import { Smartphone, Monitor, Columns } from 'lucide-react';
 
 const defaultGuestUser: Author = {
@@ -800,13 +800,30 @@ export default function App() {
   }) => {
     const postId = getSafeUUID();
 
+    // If media items are base64, try uploading to Supabase Storage 'posts' bucket
+    const rawMedia = data.mediaUrls || [];
+    let processedMedia = rawMedia;
+    try {
+      if (rawMedia.some((m) => m.startsWith('data:'))) {
+        processedMedia = await Promise.all(
+          rawMedia.map((m, idx) =>
+            m.startsWith('data:')
+              ? uploadMediaToSupabase('posts', m, `post_${postId}_${idx}`)
+              : Promise.resolve(m)
+          )
+        );
+      }
+    } catch {
+      processedMedia = rawMedia;
+    }
+
     const newPost: Post = {
       id: postId,
       author: currentUser,
       timestamp: 'Just now',
       purpose: data.purpose,
       content: data.content,
-      mediaUrls: data.mediaUrls,
+      mediaUrls: processedMedia,
       likesCount: 0,
       commentsCount: 0,
       isLiked: false,
@@ -837,8 +854,8 @@ export default function App() {
           author_id: activeAuthorId,
           content: data.content,
           purpose: data.purpose || 'Progress',
-          media_urls: data.mediaUrls || [],
-          media_type: data.mediaUrls && data.mediaUrls.length > 0 ? 'image' : 'none',
+          media_urls: processedMedia,
+          media_type: processedMedia.length > 0 ? 'image' : 'none',
           likes_count: 0,
           comments_count: 0,
         });
@@ -1507,7 +1524,16 @@ export default function App() {
     bannerUrl?: string; 
     accountabilityHubPrivacy?: 'public' | 'private' 
   }) => {
-    const nextAvatar = updated.avatar || currentUser.avatar;
+    let nextAvatar = updated.avatar || currentUser.avatar;
+    if (nextAvatar && nextAvatar.startsWith('data:')) {
+      try {
+        const hosted = await uploadMediaToSupabase('avatars', nextAvatar, updated.username);
+        if (hosted) nextAvatar = hosted;
+      } catch {
+        // graceful fallback to dataUrl
+      }
+    }
+
     const updatedUser: Author = {
       ...currentUser,
       name: updated.name,

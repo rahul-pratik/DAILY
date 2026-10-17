@@ -104,3 +104,52 @@ export const syncProfileToSupabase = async (profile: {
   }
 };
 
+export const uploadMediaToSupabase = async (
+  bucket: 'avatars' | 'posts' | 'proofs',
+  dataUrlOrFile: string | File,
+  filenamePrefix: string = 'media'
+): Promise<string> => {
+  try {
+    let fileBlob: Blob;
+    let extension = 'jpg';
+
+    if (typeof dataUrlOrFile === 'string') {
+      if (!dataUrlOrFile.startsWith('data:')) {
+        // Already a remote URL (e.g. Unsplash or already hosted)
+        return dataUrlOrFile;
+      }
+      // Convert Data URL to Blob
+      const matches = dataUrlOrFile.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
+      if (!matches) return dataUrlOrFile;
+      const mimeType = matches[1];
+      extension = mimeType.split('/')[1] || 'jpg';
+      const byteCharacters = atob(matches[2]);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      fileBlob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
+    } else {
+      fileBlob = dataUrlOrFile;
+      extension = dataUrlOrFile.name.split('.').pop() || 'jpg';
+    }
+
+    const filename = `${filenamePrefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${extension}`;
+    const { data, error } = await supabase.storage.from(bucket).upload(filename, fileBlob, {
+      cacheControl: '3600',
+      upsert: true,
+    });
+
+    if (error || !data) {
+      // If bucket does not exist or upload policy fails, gracefully return the dataUrl
+      console.warn(`Supabase Storage upload notice (${bucket}):`, error?.message);
+      return typeof dataUrlOrFile === 'string' ? dataUrlOrFile : '';
+    }
+
+    const { data: publicUrlData } = supabase.storage.from(bucket).getPublicUrl(data.path);
+    return publicUrlData.publicUrl || (typeof dataUrlOrFile === 'string' ? dataUrlOrFile : '');
+  } catch (err) {
+    console.warn('Media upload exception:', err);
+    return typeof dataUrlOrFile === 'string' ? dataUrlOrFile : '';
+  }
+};
