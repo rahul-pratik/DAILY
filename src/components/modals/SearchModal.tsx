@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
-import { Search, X, TrendingUp, Users, Trophy } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, X, TrendingUp, Users, Trophy, Loader2 } from 'lucide-react';
 import { Author, Challenge, Community, Post } from '../../types';
+import { supabase } from '../../lib/supabase';
+import { OTHER_USERS } from '../../data/initialData';
 
 interface SearchModalProps {
   posts: Post[];
@@ -26,15 +28,103 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   onNavigateAuthorProfile,
 }) => {
   const [query, setQuery] = useState('');
+  const [supabaseCreators, setSupabaseCreators] = useState<Author[]>([]);
+  const [isSearchingProfiles, setIsSearchingProfiles] = useState(false);
 
-  const filteredCreators = query.trim()
-    ? creators.filter(
+  // Search Supabase profiles in real-time when query changes
+  useEffect(() => {
+    const clean = query.trim().toLowerCase().replace(/^@/, '');
+    if (!clean) {
+      setSupabaseCreators([]);
+      setIsSearchingProfiles(false);
+      return;
+    }
+
+    setIsSearchingProfiles(true);
+    const timeoutId = setTimeout(async () => {
+      try {
+        let results: any[] = [];
+        
+        // 1. Try flexible OR search
+        const { data: orData, error: orErr } = await supabase
+          .from('profiles')
+          .select('*')
+          .or(`username.ilike.%${clean}%,name.ilike.%${clean}%`)
+          .limit(25);
+
+        if (!orErr && orData && orData.length > 0) {
+          results = orData;
+        } else {
+          // Fallback: search username directly
+          const { data: userMatches } = await supabase
+            .from('profiles')
+            .select('*')
+            .ilike('username', `%${clean}%`)
+            .limit(25);
+
+          if (userMatches && userMatches.length > 0) {
+            results = userMatches;
+          } else {
+            // Fallback: search name directly
+            const { data: nameMatches } = await supabase
+              .from('profiles')
+              .select('*')
+              .ilike('name', `%${clean}%`)
+              .limit(25);
+            if (nameMatches) results = nameMatches;
+          }
+        }
+
+        if (results && results.length > 0) {
+          const mapped: Author[] = results.map((p: any) => ({
+            id: p.id,
+            name: p.name || 'Builder',
+            username: p.username || 'builder',
+            avatar: p.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+            bio: p.bio || '',
+            followersCount: p.followers_count || 0,
+            followingCount: p.following_count || 0,
+            accountabilityHubPrivacy: (p.accountability_hub_privacy as 'public' | 'private') || 'public',
+            isCurrentUser: false,
+          }));
+          setSupabaseCreators(mapped);
+        } else {
+          setSupabaseCreators([]);
+        }
+      } catch (err) {
+        console.warn('Search profiles error:', err);
+        setSupabaseCreators([]);
+      } finally {
+        setIsSearchingProfiles(false);
+      }
+    }, 150);
+
+    return () => clearTimeout(timeoutId);
+  }, [query]);
+
+  // Combine local creators, known other users, and Supabase accounts
+  const knownLocalCreators: Author[] = [
+    ...creators,
+    ...Object.values(OTHER_USERS),
+  ];
+
+  const filteredLocalCreators = query.trim()
+    ? knownLocalCreators.filter(
         (cr) =>
           cr.name.toLowerCase().includes(query.toLowerCase()) ||
           cr.username.toLowerCase().includes(query.toLowerCase()) ||
           (cr.bio && cr.bio.toLowerCase().includes(query.toLowerCase()))
       )
     : [];
+
+  const creatorsMap = new Map<string, Author>();
+  filteredLocalCreators.forEach((c) => creatorsMap.set(c.username.toLowerCase(), c));
+  supabaseCreators.forEach((c) => {
+    if (!creatorsMap.has(c.username.toLowerCase())) {
+      creatorsMap.set(c.username.toLowerCase(), c);
+    }
+  });
+  const allFoundCreators = Array.from(creatorsMap.values());
 
   const filteredPosts = query.trim()
     ? posts.filter(
@@ -121,35 +211,52 @@ export const SearchModal: React.FC<SearchModalProps> = ({
           ) : (
             <>
               {/* Creators & Builders */}
-              {filteredCreators.length > 0 && (
+              {isSearchingProfiles && allFoundCreators.length === 0 && (
+                <div className="py-3 px-2 flex items-center gap-2 text-xs text-[#9298A3]">
+                  <Loader2 size={13} className="animate-spin text-[#3B82FF]" />
+                  <span>Searching accounts & builders...</span>
+                </div>
+              )}
+
+              {allFoundCreators.length > 0 && (
                 <div>
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-[#9298A3] mb-2">
-                    <Users size={14} className="text-[#3B82FF]" />
-                    <span>Creators & Builders</span>
+                  <div className="flex items-center justify-between text-xs font-semibold text-[#9298A3] mb-2">
+                    <div className="flex items-center gap-1.5">
+                      <Users size={14} className="text-[#3B82FF]" />
+                      <span>Accounts & Builders ({allFoundCreators.length})</span>
+                    </div>
+                    {isSearchingProfiles && (
+                      <Loader2 size={12} className="animate-spin text-[#3B82FF]" />
+                    )}
                   </div>
                   <div className="space-y-1.5">
-                    {filteredCreators.map((creator) => (
+                    {allFoundCreators.map((creator) => (
                       <div
-                        key={creator.id}
+                        key={creator.id || creator.username}
                         onClick={() => {
                           onNavigateAuthorProfile?.(creator);
                           onClose();
                         }}
-                        className="p-2.5 rounded-xl bg-[#101010] hover:bg-[#1a1f29] border border-[#20242C] cursor-pointer flex items-center justify-between"
+                        className="p-2.5 rounded-xl bg-[#101010] hover:bg-[#1a1f29] border border-[#20242C] cursor-pointer flex items-center justify-between transition-colors group"
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
                           <img
                             src={creator.avatar}
                             alt={creator.name}
-                            className="w-7 h-7 rounded-full object-cover border border-[#20242C]"
+                            className="w-8 h-8 rounded-full object-cover border border-[#20242C] group-hover:border-[#3B82FF]"
                             referrerPolicy="no-referrer"
                           />
                           <div className="min-w-0">
                             <span className="text-xs font-semibold text-white block truncate">{creator.name}</span>
-                            <span className="text-[11px] text-[#9298A3] block">@{creator.username}</span>
+                            <span className="text-[11px] text-[#3B82FF] font-mono block">@{creator.username}</span>
+                            {creator.bio && (
+                              <p className="text-[10px] text-[#9298A3] line-clamp-1">{creator.bio}</p>
+                            )}
                           </div>
                         </div>
-                        <span className="text-[11px] text-[#3B82FF] font-semibold">View</span>
+                        <span className="text-[11px] text-[#3B82FF] font-semibold px-2.5 py-1 rounded-lg bg-[#2166FF]/10 border border-[#2166FF]/20 group-hover:bg-[#2166FF] group-hover:text-white transition-all">
+                          View
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -236,11 +343,13 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                 </div>
               )}
 
-              {filteredCommunities.length === 0 &&
+              {allFoundCreators.length === 0 &&
+                filteredCommunities.length === 0 &&
                 filteredChallenges.length === 0 &&
-                filteredPosts.length === 0 && (
+                filteredPosts.length === 0 &&
+                !isSearchingProfiles && (
                   <div className="py-12 text-center text-xs text-[#9298A3]">
-                    No matches found for "{query}".
+                    No accounts, posts, or communities found for "{query}".
                   </div>
                 )}
             </>

@@ -1,14 +1,4 @@
 import { Author, Challenge, Community, NotificationItem, Post, Squad, ToDoItem } from '../types';
-import { 
-  CURRENT_USER, 
-  INITIAL_POSTS, 
-  INITIAL_CHALLENGES, 
-  INITIAL_COMMUNITIES, 
-  INITIAL_NOTIFICATIONS, 
-  INITIAL_TODOS,
-  INITIAL_SQUADS,
-  OTHER_USERS
-} from '../data/initialData';
 
 const KEYS = {
   USER: 'daily_app_current_user',
@@ -68,8 +58,8 @@ export const StorageService = {
   },
 
   // Current User Profile
-  getCurrentUser(): Author {
-    return safeParse<Author>(KEYS.USER, CURRENT_USER);
+  getCurrentUser(): Author | null {
+    return safeParse<Author | null>(KEYS.USER, null);
   },
 
   saveCurrentUser(user: Author): void {
@@ -77,8 +67,8 @@ export const StorageService = {
   },
 
   // Posts Feed
-  getPosts(): Post[] {
-    return safeParse<Post[]>(KEYS.POSTS, INITIAL_POSTS);
+  getPosts(): Post[] | null {
+    return safeParse<Post[] | null>(KEYS.POSTS, null);
   },
 
   savePosts(posts: Post[]): void {
@@ -86,15 +76,15 @@ export const StorageService = {
   },
 
   addPost(post: Post): Post[] {
-    const current = this.getPosts();
+    const current = this.getPosts() || [];
     const updated = [post, ...current];
     this.savePosts(updated);
     return updated;
   },
 
   // Challenges
-  getChallenges(): Challenge[] {
-    return safeParse<Challenge[]>(KEYS.CHALLENGES, INITIAL_CHALLENGES);
+  getChallenges(): Challenge[] | null {
+    return safeParse<Challenge[] | null>(KEYS.CHALLENGES, null);
   },
 
   saveChallenges(challenges: Challenge[]): void {
@@ -102,8 +92,8 @@ export const StorageService = {
   },
 
   // Communities
-  getCommunities(): Community[] {
-    return safeParse<Community[]>(KEYS.COMMUNITIES, INITIAL_COMMUNITIES);
+  getCommunities(): Community[] | null {
+    return safeParse<Community[] | null>(KEYS.COMMUNITIES, null);
   },
 
   saveCommunities(communities: Community[]): void {
@@ -111,8 +101,8 @@ export const StorageService = {
   },
 
   // Todos
-  getTodos(): ToDoItem[] {
-    return safeParse<ToDoItem[]>(KEYS.TODOS, INITIAL_TODOS);
+  getTodos(): ToDoItem[] | null {
+    return safeParse<ToDoItem[] | null>(KEYS.TODOS, null);
   },
 
   saveTodos(todos: ToDoItem[]): void {
@@ -120,8 +110,8 @@ export const StorageService = {
   },
 
   // Notifications
-  getNotifications(): NotificationItem[] {
-    return safeParse<NotificationItem[]>(KEYS.NOTIFICATIONS, INITIAL_NOTIFICATIONS);
+  getNotifications(): NotificationItem[] | null {
+    return safeParse<NotificationItem[] | null>(KEYS.NOTIFICATIONS, null);
   },
 
   saveNotifications(notifications: NotificationItem[]): void {
@@ -129,8 +119,8 @@ export const StorageService = {
   },
 
   // Creators / Other Users
-  getCreators(): Author[] {
-    return safeParse<Author[]>(KEYS.CREATORS, Object.values(OTHER_USERS));
+  getCreators(): Author[] | null {
+    return safeParse<Author[] | null>(KEYS.CREATORS, null);
   },
 
   saveCreators(creators: Author[]): void {
@@ -138,12 +128,29 @@ export const StorageService = {
   },
 
   // Squads
-  getSquads(): Squad[] {
-    return safeParse<Squad[]>(KEYS.SQUADS, INITIAL_SQUADS);
+  getSquads(): Squad[] | null {
+    return safeParse<Squad[] | null>(KEYS.SQUADS, null);
   },
 
   saveSquads(squads: Squad[]): void {
     safeSet(KEYS.SQUADS, squads);
+  },
+
+  // User Likes & Bookmarks
+  getUserLikes(): string[] {
+    return safeParse<string[]>('daily_app_user_likes', []);
+  },
+
+  saveUserLikes(likedPostIds: string[]): void {
+    safeSet('daily_app_user_likes', likedPostIds);
+  },
+
+  getUserBookmarks(): string[] {
+    return safeParse<string[]>('daily_app_user_bookmarks', []);
+  },
+
+  saveUserBookmarks(bookmarkedPostIds: string[]): void {
+    safeSet('daily_app_user_bookmarks', bookmarkedPostIds);
   },
 
   // Reset entire application data
@@ -159,6 +166,8 @@ export const StorageService = {
       localStorage.removeItem(KEYS.NOTIFICATIONS);
       localStorage.removeItem(KEYS.CREATORS);
       localStorage.removeItem(KEYS.SQUADS);
+      localStorage.removeItem('daily_app_user_likes');
+      localStorage.removeItem('daily_app_user_bookmarks');
     } catch (e) {
       console.error('Error clearing storage:', e);
     }

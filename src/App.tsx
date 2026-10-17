@@ -31,7 +31,7 @@ import { CreateCommunityModal } from './components/modals/CreateCommunityModal';
 import { ShareModal } from './components/modals/ShareModal';
 import { OnboardingAuthScreen } from './components/screens/OnboardingAuthScreen';
 import { StorageService } from './services/storageService';
-import { supabase } from './lib/supabase';
+import { supabase, isValidUUID, getSafeUUID, syncProfileToSupabase } from './lib/supabase';
 import { Smartphone, Monitor, Columns } from 'lucide-react';
 
 const defaultGuestUser: Author = {
@@ -120,155 +120,259 @@ export default function App() {
     StorageService.saveSquads(squads);
   }, [squads]);
 
-  // Fetch initial empty or saved states from Supabase upon authentication
-  const fetchSupabaseData = async (userAuthId: string) => {
+  // Fetch live profiles, posts, likes, bookmarks, challenges, communities, and todos from Supabase
+  const fetchSupabaseData = async (userAuthId?: string) => {
     setIsLoadingSupabase(true);
     try {
-      // 1. Fetch user profile from public.profiles
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userAuthId)
-        .maybeSingle();
-
-      if (profile) {
-        const syncedUser: Author = {
-          id: profile.id,
-          name: profile.name || 'Daily Builder',
-          username: profile.username || 'builder',
-          avatar: profile.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-          bio: profile.bio || '',
-          followersCount: profile.followers_count || 0,
-          followingCount: profile.following_count || 0,
-          accountabilityHubPrivacy: (profile.accountability_hub_privacy as 'public' | 'private') || 'public',
-          isCurrentUser: true,
-        };
-        setCurrentUser(syncedUser);
-        setViewingUser(syncedUser);
-        StorageService.saveCurrentUser(syncedUser);
+      let activeAuthId = userAuthId;
+      if (!activeAuthId) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        activeAuthId = sessionData?.session?.user?.id;
       }
 
-      // 2. Fetch posts from public.posts
+      // 1. Fetch all registered user profiles from public.profiles
+      const { data: allDbProfiles } = await supabase
+        .from('profiles')
+        .select('*')
+        .limit(100);
+
+      const profileMap = new Map<string, any>();
+      if (allDbProfiles && allDbProfiles.length > 0) {
+        allDbProfiles.forEach((p: any) => profileMap.set(p.id, p));
+
+        const mappedCreators: Author[] = allDbProfiles.map((p: any) => ({
+          id: p.id,
+          name: p.name || 'Builder',
+          username: p.username || 'builder',
+          avatar: p.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+          bio: p.bio || '',
+          followersCount: p.followers_count || 0,
+          followingCount: p.following_count || 0,
+          accountabilityHubPrivacy: (p.accountability_hub_privacy as 'public' | 'private') || 'public',
+          isCurrentUser: p.id === activeAuthId,
+        }));
+        setAllCreators(mappedCreators);
+        StorageService.saveCreators(mappedCreators);
+      }
+
+      // 2. If authenticated, sync current user's profile and user-specific relations
+      let remoteLikedSet = new Set<string>();
+      let remoteBookmarkedSet = new Set<string>();
+      const joinedChallengeIds = new Set<string>();
+      const participantProgressMap = new Map<string, number>();
+      const joinedCommunityIds = new Set<string>();
+
+      if (activeAuthId) {
+        const myProfile = profileMap.get(activeAuthId) || (
+          await supabase.from('profiles').select('*').eq('id', activeAuthId).maybeSingle()
+        )?.data;
+
+        if (myProfile) {
+          const syncedUser: Author = {
+            id: myProfile.id,
+            name: myProfile.name || currentUser.name || 'Daily Builder',
+            username: myProfile.username || currentUser.username || 'builder',
+            avatar: myProfile.avatar_url || currentUser.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+            bio: myProfile.bio ?? (currentUser.bio || ''),
+            followersCount: myProfile.followers_count || 0,
+            followingCount: myProfile.following_count || 0,
+            accountabilityHubPrivacy: (myProfile.accountability_hub_privacy as 'public' | 'private') || 'public',
+            isCurrentUser: true,
+          };
+          setCurrentUser(syncedUser);
+          setViewingUser(syncedUser);
+          StorageService.saveCurrentUser(syncedUser);
+        }
+
+        // Fetch user's likes
+        const { data: likedRows } = await supabase
+          .from('post_likes')
+          .select('post_id')
+          .eq('user_id', activeAuthId);
+        remoteLikedSet = new Set((likedRows || []).map((r: any) => r.post_id));
+        StorageService.saveUserLikes(Array.from(remoteLikedSet));
+
+        // Fetch user's saved/bookmarked posts
+        const { data: bookmarkedRows } = await supabase
+          .from('post_bookmarks')
+          .select('post_id')
+          .eq('user_id', activeAuthId);
+        remoteBookmarkedSet = new Set((bookmarkedRows || []).map((r: any) => r.post_id));
+        StorageService.saveUserBookmarks(Array.from(remoteBookmarkedSet));
+
+        // Fetch user's challenge participation
+        const { data: participantRows } = await supabase
+          .from('challenge_participants')
+          .select('challenge_id, current_progress')
+          .eq('user_id', activeAuthId);
+        (participantRows || []).forEach((row: any) => {
+          joinedChallengeIds.add(row.challenge_id);
+          participantProgressMap.set(row.challenge_id, row.current_progress);
+        });
+
+        // Fetch user's community memberships
+        const { data: memberRows } = await supabase
+          .from('community_members')
+          .select('community_id')
+          .eq('user_id', activeAuthId);
+        (memberRows || []).forEach((row: any) => {
+          joinedCommunityIds.add(row.community_id);
+        });
+
+        // Fetch user's private todos
+        const { data: dbTodos } = await supabase
+          .from('todos')
+          .select('*')
+          .eq('user_id', activeAuthId)
+          .order('created_at', { ascending: false });
+
+        if (dbTodos) {
+          const mappedTodos: ToDoItem[] = dbTodos.map((t: any) => ({
+            id: t.id,
+            challengeId: t.challenge_id || '',
+            title: t.title,
+            targetUnit: t.target_unit,
+            scheduledDate: t.scheduled_date,
+            completed: t.completed,
+            category: t.category,
+          }));
+          setToDoList(mappedTodos);
+          StorageService.saveTodos(mappedTodos);
+        }
+      }
+
+      const localLikedSet = new Set(StorageService.getUserLikes());
+      const localBookmarkedSet = new Set(StorageService.getUserBookmarks());
+
+      // 3. Fetch all posts from public.posts
       const { data: dbPosts, error: postsErr } = await supabase
         .from('posts')
-        .select('*, author:profiles(*)')
+        .select('*')
         .order('created_at', { ascending: false });
 
       if (!postsErr && dbPosts) {
-        const mappedPosts: Post[] = dbPosts.map((p: any) => ({
-          id: p.id,
-          author: {
-            id: p.author?.id || p.author_id,
-            name: p.author?.name || 'Creator',
-            username: p.author?.username || 'creator',
-            avatar: p.author?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-            isCurrentUser: p.author?.id === userAuthId,
-          },
-          content: p.content,
-          purpose: p.purpose,
-          timestamp: new Date(p.created_at).toLocaleDateString(),
-          likesCount: p.likes_count || 0,
-          commentsCount: p.comments_count || 0,
-          isLiked: false,
-          isSaved: false,
-          mediaUrls: p.media_urls || [],
-          mediaUrl: p.media_urls?.[0],
-          mediaType: p.media_type === 'none' ? undefined : p.media_type,
-        }));
-        setPosts(mappedPosts);
-        StorageService.savePosts(mappedPosts);
-      } else if (!postsErr && !dbPosts) {
-        setPosts([]);
-        StorageService.savePosts([]);
+        const mappedRemotePosts: Post[] = dbPosts.map((p: any) => {
+          const isLiked = remoteLikedSet.has(p.id) || localLikedSet.has(p.id);
+          const isSaved = remoteBookmarkedSet.has(p.id) || localBookmarkedSet.has(p.id);
+          const authorProfile = profileMap.get(p.author_id);
+
+          return {
+            id: p.id,
+            author: {
+              id: p.author_id,
+              name: authorProfile?.name || 'Creator',
+              username: authorProfile?.username || 'creator',
+              avatar: authorProfile?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+              isCurrentUser: p.author_id === activeAuthId,
+            },
+            content: p.content,
+            purpose: p.purpose,
+            timestamp: new Date(p.created_at).toLocaleDateString(),
+            likesCount: Math.max(p.likes_count || 0, isLiked ? 1 : 0),
+            commentsCount: p.comments_count || 0,
+            isLiked,
+            isSaved,
+            mediaUrls: p.media_urls || [],
+            mediaUrl: p.media_urls?.[0],
+            mediaType: p.media_type === 'none' ? undefined : p.media_type,
+          };
+        });
+
+        // Merge with any locally created posts not yet in db
+        const localPosts = StorageService.getPosts() || [];
+        const remoteIds = new Set(mappedRemotePosts.map((p) => p.id));
+        const nonSyncedLocal = localPosts.filter((p) => !remoteIds.has(p.id));
+        const finalMergedPosts = [...nonSyncedLocal, ...mappedRemotePosts];
+
+        setPosts(finalMergedPosts);
+        StorageService.savePosts(finalMergedPosts);
       }
 
-      // 3. Fetch challenges from public.challenges
+      // 4. Fetch challenges from public.challenges
       const { data: dbChallenges, error: chErr } = await supabase
         .from('challenges')
         .select('*')
         .order('created_at', { ascending: false });
 
       if (!chErr && dbChallenges) {
-        const mappedChallenges: Challenge[] = dbChallenges.map((c: any) => ({
-          id: c.id,
-          title: c.title,
-          description: c.description,
-          whatYouPerform: c.what_you_perform,
-          category: c.category,
-          type: c.type,
-          current: 0,
-          target: c.target,
-          unit: c.unit,
-          durationDays: c.duration_days,
-          maxSquadSize: c.max_squad_size,
-          tags: c.tags || [],
-          icon: c.icon,
-          status: c.status,
-          joined: false,
-        }));
-        setChallenges(mappedChallenges);
-        StorageService.saveChallenges(mappedChallenges);
-      } else if (!chErr && !dbChallenges) {
-        setChallenges([]);
-        StorageService.saveChallenges([]);
+        const mappedChallenges: Challenge[] = dbChallenges.map((c: any) => {
+          const isJoined = joinedChallengeIds.has(c.id);
+          const currentDay = participantProgressMap.get(c.id) ?? (isJoined ? 1 : 0);
+          const creatorProfile = profileMap.get(c.creator_id);
+
+          return {
+            id: c.id,
+            title: c.title,
+            description: c.description,
+            whatYouPerform: c.what_you_perform,
+            category: c.category,
+            type: c.type,
+            current: currentDay,
+            target: c.target,
+            unit: c.unit,
+            durationDays: c.duration_days,
+            maxSquadSize: c.max_squad_size,
+            tags: c.tags || [],
+            icon: c.icon,
+            status: c.status,
+            joined: isJoined,
+            creator: creatorProfile ? {
+              name: creatorProfile.name,
+              username: creatorProfile.username,
+              avatar: creatorProfile.avatar_url,
+            } : undefined,
+          };
+        });
+
+        const localChallenges = StorageService.getChallenges() || [];
+        const remoteChIds = new Set(mappedChallenges.map((c) => c.id));
+        const nonSyncedChLocal = localChallenges.filter((c) => !remoteChIds.has(c.id));
+        const finalMergedChallenges = [...nonSyncedChLocal, ...mappedChallenges];
+
+        setChallenges(finalMergedChallenges);
+        StorageService.saveChallenges(finalMergedChallenges);
       }
 
-      // 4. Fetch communities from public.communities
+      // 5. Fetch communities from public.communities
       const { data: dbCommunities, error: commErr } = await supabase
         .from('communities')
         .select('*')
         .order('created_at', { ascending: false });
 
       if (!commErr && dbCommunities) {
-        const mappedCommunities: Community[] = dbCommunities.map((cm: any) => ({
-          id: cm.id,
-          name: cm.name,
-          description: cm.description,
-          icon: cm.icon || 'code',
-          accentColor: cm.accent_color || '#2166FF',
-          membersCount: cm.members_count || 1,
-          isJoined: false,
-          category: cm.category,
-          isPublic: cm.is_public ?? true,
-          tags: cm.tags || [],
-          creator: {
-            id: cm.creator_id || 'creator',
-            name: 'Community Founder',
-            username: 'founder',
-            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-          },
-          coverUrl: cm.cover_url,
-          guidelines: cm.guidelines || [],
-        }));
-        setCommunities(mappedCommunities);
-        StorageService.saveCommunities(mappedCommunities);
-      } else if (!commErr && !dbCommunities) {
-        setCommunities([]);
-        StorageService.saveCommunities([]);
-      }
+        const mappedCommunities: Community[] = dbCommunities.map((cm: any) => {
+          const isJoined = joinedCommunityIds.has(cm.id);
+          const creatorProfile = profileMap.get(cm.creator_id);
 
-      // 5. Fetch todos for this user
-      const { data: dbTodos, error: todosErr } = await supabase
-        .from('todos')
-        .select('*')
-        .eq('user_id', userAuthId)
-        .order('created_at', { ascending: false });
+          return {
+            id: cm.id,
+            name: cm.name,
+            description: cm.description,
+            icon: cm.icon || 'code',
+            accentColor: cm.accent_color || '#2166FF',
+            membersCount: cm.members_count || 1,
+            isJoined,
+            category: cm.category,
+            isPublic: cm.is_public ?? true,
+            tags: cm.tags || [],
+            creator: {
+              id: cm.creator_id || 'creator',
+              name: creatorProfile?.name || 'Community Founder',
+              username: creatorProfile?.username || 'founder',
+              avatar: creatorProfile?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+            },
+            coverUrl: cm.cover_url,
+            guidelines: cm.guidelines || [],
+          };
+        });
 
-      if (!todosErr && dbTodos) {
-        const mappedTodos: ToDoItem[] = dbTodos.map((t: any) => ({
-          id: t.id,
-          challengeId: t.challenge_id || '',
-          title: t.title,
-          targetUnit: t.target_unit,
-          scheduledDate: t.scheduled_date,
-          completed: t.completed,
-          category: t.category,
-        }));
-        setToDoList(mappedTodos);
-        StorageService.saveTodos(mappedTodos);
-      } else if (!todosErr && !dbTodos) {
-        setToDoList([]);
-        StorageService.saveTodos([]);
+        const localCommunities = StorageService.getCommunities() || [];
+        const remoteCommIds = new Set(mappedCommunities.map((c) => c.id));
+        const nonSyncedCommLocal = localCommunities.filter((c) => !remoteCommIds.has(c.id));
+        const finalMergedCommunities = [...nonSyncedCommLocal, ...mappedCommunities];
+
+        setCommunities(finalMergedCommunities);
+        StorageService.saveCommunities(finalMergedCommunities);
       }
     } catch (e) {
       console.warn('Supabase query exception (proceeding with clean local state):', e);
@@ -279,13 +383,19 @@ export default function App() {
 
   // Listen for Supabase session and auth state changes
   React.useEffect(() => {
+    // Immediate initial fetch for all visitors
+    fetchSupabaseData();
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         const u = session.user;
         const meta = u.user_metadata || {};
         const derivedName = meta.name || meta.full_name || u.email?.split('@')[0] || 'Daily Builder';
         const derivedUsername = meta.username || u.email?.split('@')[0]?.toLowerCase().replace(/[^a-z0-9_.]/g, '') || 'builder';
-        const derivedAvatar = meta.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80';
+        const savedUser = StorageService.getCurrentUser();
+        const derivedAvatar = (savedUser?.avatar && !savedUser.avatar.includes('unsplash'))
+          ? savedUser.avatar
+          : (meta.avatar_url || savedUser?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80');
 
         const authUser: Author = {
           ...currentUser,
@@ -324,7 +434,10 @@ export default function App() {
         const meta = u.user_metadata || {};
         const derivedName = meta.name || meta.full_name || u.email?.split('@')[0] || 'Daily Builder';
         const derivedUsername = meta.username || u.email?.split('@')[0]?.toLowerCase().replace(/[^a-z0-9_.]/g, '') || 'builder';
-        const derivedAvatar = meta.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80';
+        const savedUser = StorageService.getCurrentUser();
+        const derivedAvatar = (savedUser?.avatar && !savedUser.avatar.includes('unsplash'))
+          ? savedUser.avatar
+          : (meta.avatar_url || savedUser?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80');
 
         const authUser: Author = {
           ...currentUser,
@@ -425,9 +538,34 @@ export default function App() {
         bio: `Member and builder on Daily.`,
         isCurrentUser: false,
         isFollowing: false,
-        followersCount: 120,
-        followingCount: 45,
+        followersCount: 0,
+        followingCount: 0,
       });
+
+      // Also query Supabase profiles to ensure live details (avatar, bio, followers) are loaded
+      if (target.username) {
+        supabase
+          .from('profiles')
+          .select('*')
+          .eq('username', target.username)
+          .maybeSingle()
+          .then(({ data }) => {
+            if (data) {
+              setViewingUser({
+                id: data.id,
+                name: data.name,
+                username: data.username,
+                avatar: data.avatar_url || target.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+                bio: data.bio || 'Member and builder on Daily.',
+                isCurrentUser: false,
+                isFollowing: false,
+                followersCount: data.followers_count || 0,
+                followingCount: data.following_count || 0,
+                accountabilityHubPrivacy: data.accountability_hub_privacy || 'public',
+              });
+            }
+          });
+      }
     }
 
     setPreviousScreen(currentScreen);
@@ -497,37 +635,120 @@ export default function App() {
   };
 
   // Interactions: Like Post
-  const handleToggleLike = (postId: string) => {
-    setPosts((prev) =>
-      prev.map((post) => {
+  const handleToggleLike = async (postId: string) => {
+    let nextIsLiked = false;
+    let nextLikesCount = 0;
+
+    setPosts((prev) => {
+      const updated = prev.map((post) => {
         if (post.id === postId) {
-          const isLiked = !post.isLiked;
+          nextIsLiked = !post.isLiked;
+          nextLikesCount = nextIsLiked ? post.likesCount + 1 : Math.max(0, post.likesCount - 1);
           return {
             ...post,
-            isLiked,
-            likesCount: isLiked ? post.likesCount + 1 : Math.max(0, post.likesCount - 1),
+            isLiked: nextIsLiked,
+            likesCount: nextLikesCount,
           };
         }
         return post;
-      })
-    );
+      });
+      StorageService.savePosts(updated);
+      return updated;
+    });
+
+    // Persist user likes locally
+    const userLikes = StorageService.getUserLikes();
+    const updatedLikes = nextIsLiked
+      ? Array.from(new Set([...userLikes, postId]))
+      : userLikes.filter((id) => id !== postId);
+    StorageService.saveUserLikes(updatedLikes);
+
+    // Sync with Supabase database
+    try {
+      let activeUserId: string | undefined = currentUser?.id;
+      if (!isValidUUID(activeUserId)) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        activeUserId = sessionData?.session?.user?.id;
+      }
+
+      if (isValidUUID(activeUserId) && isValidUUID(postId)) {
+        await syncProfileToSupabase({ ...currentUser, id: activeUserId! });
+
+        if (nextIsLiked) {
+          await supabase.from('post_likes').upsert({
+            post_id: postId,
+            user_id: activeUserId,
+          });
+        } else {
+          await supabase.from('post_likes').delete().match({
+            post_id: postId,
+            user_id: activeUserId,
+          });
+        }
+        await supabase
+          .from('posts')
+          .update({ likes_count: nextLikesCount })
+          .eq('id', postId);
+      }
+    } catch (e) {
+      console.warn('Supabase like sync notice:', e);
+    }
   };
 
   // Interactions: Save Post
-  const handleToggleSave = (postId: string) => {
-    setPosts((prev) =>
-      prev.map((post) => {
+  const handleToggleSave = async (postId: string) => {
+    let nextIsSaved = false;
+
+    setPosts((prev) => {
+      const updated = prev.map((post) => {
         if (post.id === postId) {
-          const isSaved = !post.isSaved;
-          showToast(isSaved ? 'Post saved to your profile' : 'Post removed from saved');
+          nextIsSaved = !post.isSaved;
           return {
             ...post,
-            isSaved,
+            isSaved: nextIsSaved,
           };
         }
         return post;
-      })
-    );
+      });
+      StorageService.savePosts(updated);
+      return updated;
+    });
+
+    // Persist user bookmarks locally
+    const userBookmarks = StorageService.getUserBookmarks();
+    const updatedBookmarks = nextIsSaved
+      ? Array.from(new Set([...userBookmarks, postId]))
+      : userBookmarks.filter((id) => id !== postId);
+    StorageService.saveUserBookmarks(updatedBookmarks);
+
+    showToast(nextIsSaved ? 'Post saved to your profile' : 'Post removed from saved');
+
+    // Sync with Supabase database
+    try {
+      let activeUserId: string | undefined = currentUser?.id;
+      if (!isValidUUID(activeUserId)) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        activeUserId = sessionData?.session?.user?.id;
+      }
+
+      if (isValidUUID(activeUserId) && isValidUUID(postId)) {
+        await syncProfileToSupabase({ ...currentUser, id: activeUserId! });
+
+        if (nextIsSaved) {
+          await supabase.from('post_bookmarks').upsert({
+            post_id: postId,
+            user_id: activeUserId,
+          });
+        } else {
+          await supabase.from('post_bookmarks').delete().match({
+            post_id: postId,
+            user_id: activeUserId,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Supabase bookmark sync notice:', e);
+    }
   };
 
   // Interactions: Add Comment
@@ -540,8 +761,8 @@ export default function App() {
       likes: 0,
     };
 
-    setPosts((prev) =>
-      prev.map((post) => {
+    setPosts((prev) => {
+      const updated = prev.map((post) => {
         if (post.id === postId) {
           const updatedComments = [newComment, ...(post.comments || [])];
           return {
@@ -551,8 +772,10 @@ export default function App() {
           };
         }
         return post;
-      })
-    );
+      });
+      StorageService.savePosts(updated);
+      return updated;
+    });
 
     // Update active modal reference
     setSelectedPostForComments((prev) =>
@@ -569,28 +792,64 @@ export default function App() {
   };
 
   // Interactions: Create Post
-  const handleCreatePost = (data: {
+  const handleCreatePost = async (data: {
     content: string;
     purpose?: PurposeLabel;
     mediaUrls?: string[];
     audience?: string;
   }) => {
+    const postId = getSafeUUID();
+
     const newPost: Post = {
-      id: `post_${Date.now()}`,
+      id: postId,
       author: currentUser,
       timestamp: 'Just now',
       purpose: data.purpose,
       content: data.content,
       mediaUrls: data.mediaUrls,
-      likesCount: 1,
+      likesCount: 0,
       commentsCount: 0,
-      isLiked: true,
+      isLiked: false,
       isSaved: false,
     };
 
-    setPosts([newPost, ...posts]);
+    const updatedPosts = [newPost, ...posts];
+    setPosts(updatedPosts);
+    StorageService.savePosts(updatedPosts);
     setCurrentScreen('home');
     showToast('Your work has been shared to Daily');
+
+    // Persist post and author profile to Supabase
+    try {
+      let activeAuthorId: string | undefined = currentUser?.id;
+      if (!isValidUUID(activeAuthorId)) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        activeAuthorId = sessionData?.session?.user?.id;
+      }
+
+      if (isValidUUID(activeAuthorId)) {
+        // Ensure author profile is synced
+        await syncProfileToSupabase({ ...currentUser, id: activeAuthorId! });
+
+        // Insert post into public.posts
+        const { error: insertErr } = await supabase.from('posts').insert({
+          id: postId,
+          author_id: activeAuthorId,
+          content: data.content,
+          purpose: data.purpose || 'Progress',
+          media_urls: data.mediaUrls || [],
+          media_type: data.mediaUrls && data.mediaUrls.length > 0 ? 'image' : 'none',
+          likes_count: 0,
+          comments_count: 0,
+        });
+
+        if (insertErr) {
+          console.warn('Supabase post insert notice:', insertErr.message);
+        }
+      }
+    } catch (e) {
+      console.warn('Supabase post insert exception:', e);
+    }
   };
 
   // Interactions: Share Post to Community as a post
@@ -678,11 +937,11 @@ export default function App() {
   };
 
   // Interactions: Challenge Join/Leave (Day 1 on start, Day 0 on leave)
-  const handleToggleJoinChallenge = (challengeId: string) => {
+  const handleToggleJoinChallenge = async (challengeId: string) => {
     let starting = false;
 
-    setChallenges((prev) =>
-      prev.map((ch) => {
+    setChallenges((prev) => {
+      const updated = prev.map((ch) => {
         if (ch.id === challengeId) {
           starting = !ch.joined;
           if (starting) {
@@ -704,8 +963,10 @@ export default function App() {
           }
         }
         return ch;
-      })
-    );
+      });
+      StorageService.saveChallenges(updated);
+      return updated;
+    });
 
     setSelectedChallenge((prev) => {
       if (prev && prev.id === challengeId) {
@@ -732,12 +993,40 @@ export default function App() {
       }
       return prev;
     });
+
+    // Sync challenge participation to Supabase
+    try {
+      let activeUserId: string | undefined = currentUser?.id;
+      if (!isValidUUID(activeUserId)) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        activeUserId = sessionData?.session?.user?.id;
+      }
+
+      if (isValidUUID(activeUserId) && isValidUUID(challengeId)) {
+        await syncProfileToSupabase({ ...currentUser, id: activeUserId! });
+
+        if (starting) {
+          await supabase.from('challenge_participants').upsert({
+            challenge_id: challengeId,
+            user_id: activeUserId,
+            current_progress: 1,
+          });
+        } else {
+          await supabase.from('challenge_participants').delete().match({
+            challenge_id: challengeId,
+            user_id: activeUserId,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('Supabase challenge participant sync notice:', err);
+    }
   };
 
   // Interactions: Restart Challenge (Resets to Day 1)
   const handleRestartChallenge = (challengeId: string) => {
-    setChallenges((prev) =>
-      prev.map((ch) => {
+    setChallenges((prev) => {
+      const updated = prev.map((ch) => {
         if (ch.id === challengeId) {
           showToast(`🎉 Challenge restarted: ${ch.title}! Ready for Day 1.`);
           return {
@@ -748,8 +1037,10 @@ export default function App() {
           };
         }
         return ch;
-      })
-    );
+      });
+      StorageService.saveChallenges(updated);
+      return updated;
+    });
 
     setSelectedChallenge((prev) =>
       prev && prev.id === challengeId
@@ -765,9 +1056,10 @@ export default function App() {
   };
 
   // Create Challenge handler
-  const handleCreateChallenge = (data: Partial<Challenge>) => {
+  const handleCreateChallenge = async (data: Partial<Challenge>) => {
+    const challengeId = getSafeUUID();
     const newChallenge: Challenge = {
-      id: `ch_${Date.now()}`,
+      id: challengeId,
       title: data.title || 'New Challenge',
       description: data.description || '',
       whatYouPerform: data.whatYouPerform || data.description || '',
@@ -791,8 +1083,49 @@ export default function App() {
       },
     };
 
-    setChallenges([newChallenge, ...challenges]);
+    const nextChallenges = [newChallenge, ...challenges];
+    setChallenges(nextChallenges);
+    StorageService.saveChallenges(nextChallenges);
     showToast(`🎉 New Challenge created: "${newChallenge.title}" (Day 1)`);
+
+    // Persist to Supabase
+    try {
+      let activeUserId: string | undefined = currentUser?.id;
+      if (!isValidUUID(activeUserId)) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        activeUserId = sessionData?.session?.user?.id;
+      }
+
+      if (isValidUUID(activeUserId)) {
+        await syncProfileToSupabase({ ...currentUser, id: activeUserId! });
+
+        await supabase.from('challenges').insert({
+          id: challengeId,
+          title: newChallenge.title,
+          description: newChallenge.description,
+          what_you_perform: newChallenge.whatYouPerform,
+          category: newChallenge.category,
+          type: newChallenge.type,
+          target: newChallenge.target,
+          unit: newChallenge.unit,
+          duration_days: newChallenge.durationDays,
+          max_squad_size: newChallenge.maxSquadSize || 5,
+          tags: newChallenge.tags,
+          icon: newChallenge.icon,
+          status: 'active',
+          creator_id: activeUserId,
+          participants_count: 1,
+        });
+
+        await supabase.from('challenge_participants').insert({
+          challenge_id: challengeId,
+          user_id: activeUserId,
+          current_progress: 1,
+        });
+      }
+    } catch (err) {
+      console.warn('Supabase challenge creation notice:', err);
+    }
   };
 
   // Interactions: Add Cohort Proof & update challenge progress
@@ -1057,27 +1390,58 @@ export default function App() {
   };
 
   // Interactions: Toggle Community Join
-  const handleToggleJoinCommunity = (communityId: string) => {
-    setCommunities((prev) =>
-      prev.map((c) => {
+  const handleToggleJoinCommunity = async (communityId: string) => {
+    let nowJoined = false;
+    setCommunities((prev) => {
+      const updated = prev.map((c) => {
         if (c.id === communityId) {
-          const isJoined = !c.isJoined;
-          showToast(isJoined ? `Joined ${c.name}` : `Left ${c.name}`);
+          nowJoined = !c.isJoined;
+          showToast(nowJoined ? `Joined ${c.name}` : `Left ${c.name}`);
           return {
             ...c,
-            isJoined,
-            membersCount: isJoined ? c.membersCount + 1 : Math.max(0, c.membersCount - 1),
+            isJoined: nowJoined,
+            membersCount: nowJoined ? c.membersCount + 1 : Math.max(0, c.membersCount - 1),
           };
         }
         return c;
-      })
-    );
+      });
+      StorageService.saveCommunities(updated);
+      return updated;
+    });
+
+    try {
+      let activeUserId: string | undefined = currentUser?.id;
+      if (!isValidUUID(activeUserId)) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        activeUserId = sessionData?.session?.user?.id;
+      }
+
+      if (isValidUUID(activeUserId) && isValidUUID(communityId)) {
+        await syncProfileToSupabase({ ...currentUser, id: activeUserId! });
+
+        if (nowJoined) {
+          await supabase.from('community_members').upsert({
+            community_id: communityId,
+            user_id: activeUserId,
+            role: 'member',
+          });
+        } else {
+          await supabase.from('community_members').delete().match({
+            community_id: communityId,
+            user_id: activeUserId,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('Supabase community join sync notice:', err);
+    }
   };
 
   // Create Community handler
-  const handleCreateCommunity = (data: Partial<Community>) => {
+  const handleCreateCommunity = async (data: Partial<Community>) => {
+    const communityId = getSafeUUID();
     const newCommunity: Community = {
-      id: `comm_${Date.now()}`,
+      id: communityId,
       name: data.name || 'New Community',
       description: data.description || '',
       icon: data.icon || 'code',
@@ -1094,12 +1458,48 @@ export default function App() {
       coverUrl: data.coverUrl,
     };
 
-    setCommunities([newCommunity, ...communities]);
+    const nextCommunities = [newCommunity, ...communities];
+    setCommunities(nextCommunities);
+    StorageService.saveCommunities(nextCommunities);
     showToast(`🎉 Community created: "${newCommunity.name}"`);
+
+    try {
+      let activeUserId: string | undefined = currentUser?.id;
+      if (!isValidUUID(activeUserId)) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        activeUserId = sessionData?.session?.user?.id;
+      }
+
+      if (isValidUUID(activeUserId)) {
+        await syncProfileToSupabase({ ...currentUser, id: activeUserId! });
+
+        await supabase.from('communities').insert({
+          id: communityId,
+          name: newCommunity.name,
+          description: newCommunity.description,
+          category: newCommunity.category,
+          is_public: newCommunity.isPublic,
+          icon: newCommunity.icon,
+          accent_color: newCommunity.accentColor,
+          cover_url: newCommunity.coverUrl || null,
+          tags: newCommunity.tags,
+          creator_id: activeUserId,
+          members_count: 1,
+        });
+
+        await supabase.from('community_members').insert({
+          community_id: communityId,
+          user_id: activeUserId,
+          role: 'admin',
+        });
+      }
+    } catch (err) {
+      console.warn('Supabase community creation notice:', err);
+    }
   };
 
   // Profile Save
-  const handleSaveProfile = (updated: { 
+  const handleSaveProfile = async (updated: { 
     name: string; 
     username: string; 
     bio: string; 
@@ -1107,25 +1507,77 @@ export default function App() {
     bannerUrl?: string; 
     accountabilityHubPrivacy?: 'public' | 'private' 
   }) => {
+    const nextAvatar = updated.avatar || currentUser.avatar;
     const updatedUser: Author = {
       ...currentUser,
       name: updated.name,
       username: updated.username,
       bio: updated.bio,
-      ...(updated.avatar ? { avatar: updated.avatar } : {}),
+      avatar: nextAvatar,
       ...(updated.bannerUrl ? { bannerUrl: updated.bannerUrl } : {}),
       ...(updated.accountabilityHubPrivacy ? { accountabilityHubPrivacy: updated.accountabilityHubPrivacy } : {}),
     };
+
     setCurrentUser(updatedUser);
     setViewingUser(updatedUser);
-    setPosts((prev) =>
-      prev.map((p) =>
+    StorageService.saveCurrentUser(updatedUser);
+
+    setPosts((prev) => {
+      const updatedPosts = prev.map((p) =>
         p.author.username === currentUser.username || p.author.id === currentUser.id
           ? { ...p, author: { ...p.author, ...updatedUser } }
           : p
-      )
-    );
-    showToast('Profile, avatar & banner updated');
+      );
+      StorageService.savePosts(updatedPosts);
+      return updatedPosts;
+    });
+
+    // Also update allCreators so search and user lists immediately reflect new avatar and details
+    setAllCreators((prev) => {
+      const exists = prev.some((c) => c.id === updatedUser.id || c.username === updatedUser.username);
+      const nextCreators = exists
+        ? prev.map((c) => (c.id === updatedUser.id || c.username === updatedUser.username ? { ...c, ...updatedUser } : c))
+        : [updatedUser, ...prev];
+      StorageService.saveCreators(nextCreators);
+      return nextCreators;
+    });
+
+    showToast('Profile picture & details updated');
+
+    // Persist to Supabase database profiles table and Auth user_metadata
+    try {
+      let activeUserId: string | undefined = currentUser?.id;
+      if (!isValidUUID(activeUserId)) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        activeUserId = sessionData?.session?.user?.id;
+      }
+
+      if (isValidUUID(activeUserId)) {
+        await syncProfileToSupabase({
+          id: activeUserId!,
+          name: updated.name,
+          username: updated.username,
+          bio: updated.bio,
+          avatar: nextAvatar,
+          accountabilityHubPrivacy: updated.accountabilityHubPrivacy || currentUser.accountabilityHubPrivacy || 'public',
+        });
+
+        const metaUpdate: any = {
+          name: updated.name,
+          username: updated.username,
+          bio: updated.bio,
+        };
+        if (nextAvatar.startsWith('http')) {
+          metaUpdate.avatar_url = nextAvatar;
+        }
+
+        await supabase.auth.updateUser({
+          data: metaUpdate,
+        });
+      }
+    } catch (err) {
+      console.warn('Supabase profile update notice:', err);
+    }
   };
 
   // Community Guidelines & Join Requests Handlers
@@ -1364,27 +1816,12 @@ export default function App() {
     }
     setIsOnboardingDone(true);
 
-    // Check if the user is authenticated with Supabase to fetch initial data or start fresh immediately
-    if (newUser.id && !newUser.id.startsWith('user_')) {
+    // Sync profile to Supabase and load live data
+    syncProfileToSupabase(newUser).finally(() => {
       fetchSupabaseData(newUser.id);
-    } else {
-      // Start fresh with clean empty state immediately
-      setPosts([]);
-      setChallenges([]);
-      setCommunities([]);
-      setToDoList([]);
-      setNotifications([]);
-      setSquads([]);
-      setActiveChallenge(null);
-      setActiveCommunity(null);
-      StorageService.savePosts([]);
-      StorageService.saveChallenges([]);
-      StorageService.saveCommunities([]);
-      StorageService.saveTodos([]);
-      StorageService.saveNotifications([]);
-      StorageService.saveSquads([]);
-    }
-    showToast(`Welcome, ${newUser.name}! Fresh account ready.`);
+    });
+
+    showToast(`Welcome, ${newUser.name}! Your account is ready.`);
   };
 
   const handleResetToFreshData = () => {

@@ -17,7 +17,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { Author } from '../../types';
-import { supabase } from '../../lib/supabase';
+import { supabase, syncProfileToSupabase, isValidUUID } from '../../lib/supabase';
 import { OTHER_USERS } from '../../data/initialData';
 
 interface OnboardingAuthScreenProps {
@@ -341,6 +341,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
     const finalName = name.trim() || 'Daily Builder';
     const finalUsername = username.trim().toLowerCase().replace(/^@/, '');
     const finalBio = bio.trim() || 'Building daily consistency and verifiable discipline.';
+    const finalAvatar = avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80';
 
     if (!finalUsername) {
       setAuthError('Please choose a valid username handle.');
@@ -357,50 +358,59 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
 
     try {
       // Re-verify uniqueness against public.profiles right before saving
-      const { data: existingUser } = await supabase
-        .from('profiles')
-        .select('id, username')
-        .ilike('username', finalUsername)
-        .limit(1);
+      const { data: { session } } = await supabase.auth.getSession();
+      const activeUserId = session?.user?.id || (isValidUUID(userId) ? userId : undefined);
 
-      if (existingUser && existingUser.length > 0 && existingUser[0].id !== userId) {
-        setUsernameStatus('taken');
-        setUsernameMessage(`@${finalUsername} is already taken by someone else.`);
-        setAuthError(`Username @${finalUsername} is already taken. Please choose another.`);
-        setAuthLoading(false);
-        return;
+      if (activeUserId) {
+        const { data: existingUser } = await supabase
+          .from('profiles')
+          .select('id, username')
+          .ilike('username', finalUsername)
+          .limit(1);
+
+        if (existingUser && existingUser.length > 0 && existingUser[0].id !== activeUserId) {
+          setUsernameStatus('taken');
+          setUsernameMessage(`@${finalUsername} is already taken by someone else.`);
+          setAuthError(`Username @${finalUsername} is already taken. Please choose another.`);
+          setAuthLoading(false);
+          return;
+        }
       }
 
-      // Upsert profile in Supabase database
-      const finalAvatar = avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80';
-      await supabase.from('profiles').upsert({
-        id: userId,
-        username: finalUsername,
-        name: finalName,
-        avatar_url: finalAvatar,
-        bio: finalBio,
-        updated_at: new Date().toISOString()
-      });
+      // Sync profile to Supabase public.profiles table
+      if (activeUserId) {
+        await syncProfileToSupabase({
+          id: activeUserId,
+          name: finalName,
+          username: finalUsername,
+          avatar: finalAvatar,
+          bio: finalBio,
+        });
 
-      // Update user metadata in Supabase Auth
-      await supabase.auth.updateUser({
-        data: {
+        // Update user metadata in Supabase Auth (avoid passing huge base64 strings to metadata)
+        const metaUpdate: any = {
           name: finalName,
           username: finalUsername,
           bio: finalBio,
-          avatar_url: finalAvatar,
           onboarding_completed: true,
-        },
-      });
+        };
+        if (finalAvatar.startsWith('http')) {
+          metaUpdate.avatar_url = finalAvatar;
+        }
+        await supabase.auth.updateUser({
+          data: metaUpdate,
+        });
+      }
     } catch (err: any) {
       console.warn('Profile sync notice:', err);
     }
 
+    const effectiveId = userId && isValidUUID(userId) ? userId : (initialUser?.id || `user_${Date.now()}`);
     const finalUser: Author = {
-      id: userId || initialUser?.id || `user_${Date.now()}`,
+      id: effectiveId,
       name: finalName,
       username: finalUsername,
-      avatar: avatarUrl,
+      avatar: finalAvatar,
       bio: finalBio,
       isCurrentUser: true,
       isFollowing: false,
