@@ -190,7 +190,7 @@ export default function App() {
           .select('post_id')
           .eq('user_id', activeAuthId);
         remoteLikedSet = new Set((likedRows || []).map((r: any) => r.post_id));
-        StorageService.saveUserLikes(Array.from(remoteLikedSet));
+        StorageService.saveUserLikes(Array.from(remoteLikedSet), activeAuthId);
 
         // Fetch user's saved/bookmarked posts
         const { data: bookmarkedRows } = await supabase
@@ -198,7 +198,7 @@ export default function App() {
           .select('post_id')
           .eq('user_id', activeAuthId);
         remoteBookmarkedSet = new Set((bookmarkedRows || []).map((r: any) => r.post_id));
-        StorageService.saveUserBookmarks(Array.from(remoteBookmarkedSet));
+        StorageService.saveUserBookmarks(Array.from(remoteBookmarkedSet), activeAuthId);
 
         // Fetch user's challenge participation
         const { data: participantRows } = await supabase
@@ -241,8 +241,9 @@ export default function App() {
         }
       }
 
-      const localLikedSet = new Set(StorageService.getUserLikes());
-      const localBookmarkedSet = new Set(StorageService.getUserBookmarks());
+      const effectiveUserId = activeAuthId || currentUser.id;
+      const localLikedSet = new Set(StorageService.getUserLikes(effectiveUserId));
+      const localBookmarkedSet = new Set(StorageService.getUserBookmarks(effectiveUserId));
 
       // 3. Fetch all posts from public.posts
       const { data: dbPosts, error: postsErr } = await supabase
@@ -251,10 +252,23 @@ export default function App() {
         .order('created_at', { ascending: false });
 
       if (!postsErr && dbPosts) {
+        // Query post_likes count map for true cross-account aggregate likes
+        const { data: allLikesData } = await supabase
+          .from('post_likes')
+          .select('post_id');
+
+        const trueLikesCountMap = new Map<string, number>();
+        (allLikesData || []).forEach((row: any) => {
+          trueLikesCountMap.set(row.post_id, (trueLikesCountMap.get(row.post_id) || 0) + 1);
+        });
+
         const mappedRemotePosts: Post[] = dbPosts.map((p: any) => {
-          const isLiked = remoteLikedSet.has(p.id) || localLikedSet.has(p.id);
-          const isSaved = remoteBookmarkedSet.has(p.id) || localBookmarkedSet.has(p.id);
+          const isLiked = activeAuthId ? remoteLikedSet.has(p.id) : localLikedSet.has(p.id);
+          const isSaved = activeAuthId ? remoteBookmarkedSet.has(p.id) : localBookmarkedSet.has(p.id);
           const authorProfile = profileMap.get(p.author_id);
+          const totalLikes = trueLikesCountMap.has(p.id)
+            ? trueLikesCountMap.get(p.id)!
+            : Math.max(p.likes_count || 0, isLiked ? 1 : 0);
 
           return {
             id: p.id,
@@ -268,7 +282,7 @@ export default function App() {
             content: p.content,
             purpose: p.purpose,
             timestamp: new Date(p.created_at).toLocaleDateString(),
-            likesCount: Math.max(p.likes_count || 0, isLiked ? 1 : 0),
+            likesCount: totalLikes,
             commentsCount: p.comments_count || 0,
             isLiked,
             isSaved,
@@ -374,6 +388,108 @@ export default function App() {
         setCommunities(finalMergedCommunities);
         StorageService.saveCommunities(finalMergedCommunities);
       }
+
+      // 6. Fetch live notifications for active user from public.notifications
+      if (activeAuthId) {
+        const { data: dbNotifs } = await supabase
+          .from('notifications')
+          .select('*')
+          .eq('recipient_id', activeAuthId)
+          .order('created_at', { ascending: false });
+
+        if (dbNotifs) {
+          const mappedNotifs: NotificationItem[] = dbNotifs.map((n: any) => {
+            const senderProfile = profileMap.get(n.sender_id);
+            return {
+              id: n.id,
+              user: {
+                id: n.sender_id,
+                name: senderProfile?.name || 'Builder',
+                username: senderProfile?.username || 'builder',
+                avatar: senderProfile?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+                isCurrentUser: false,
+              },
+              action: n.action,
+              target: n.target,
+              time: new Date(n.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              read: n.read,
+              type: (n.type as any) || 'squad_invitation',
+              squadInvitation: (n.squad_id || n.type === 'squad_invitation' || n.action?.includes('squad')) ? {
+                squadId: n.squad_id || 'squad_live_invite',
+                squadName: n.action?.includes('"') ? n.action.split('"')[1] : (n.target?.includes('"') ? n.target.split('"')[1] : 'Squad Sprint'),
+                challengeTitle: 'Squad Sprint',
+                requiredMembers: 5,
+                status: 'pending',
+              } : undefined,
+            };
+          });
+
+          setNotifications(mappedNotifs);
+          StorageService.saveNotifications(mappedNotifs);
+        }
+      }
+
+      // 7. Fetch live squads from public.squads
+      const { data: dbSquads } = await supabase
+        .from('squads')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (dbSquads && dbSquads.length > 0) {
+        const { data: dbMembers } = await supabase.from('squad_members').select('*');
+        const membersBySquad = new Map<string, any[]>();
+        (dbMembers || []).forEach((m: any) => {
+          const arr = membersBySquad.get(m.squad_id) || [];
+          arr.push(m);
+          membersBySquad.set(m.squad_id, arr);
+        });
+
+        const mappedSquads: Squad[] = dbSquads.map((sq: any) => {
+          const creatorProfile = profileMap.get(sq.creator_id);
+          const rawMembers = membersBySquad.get(sq.id) || [];
+          const squadMembersList = rawMembers.map((rm: any) => {
+            const p = profileMap.get(rm.user_id);
+            return {
+              id: rm.user_id,
+              name: p?.name || 'Builder',
+              username: p?.username || 'builder',
+              avatar: p?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+              dayReached: rm.day_reached || 1,
+              role: rm.role || 'member',
+            };
+          });
+
+          return {
+            id: sq.id,
+            name: sq.name,
+            category: sq.category,
+            requiredSize: sq.required_size || 5,
+            challengeId: sq.challenge_id,
+            challengeTitle: sq.challenge_id ? (dbChallenges?.find((c: any) => c.id === sq.challenge_id)?.title || 'Squad Sprint') : undefined,
+            creator: {
+              name: creatorProfile?.name || 'Squad Lead',
+              username: creatorProfile?.username || 'leader',
+              avatar: creatorProfile?.avatar_url,
+            },
+            members: squadMembersList.length > 0 ? squadMembersList : [
+              {
+                id: sq.creator_id,
+                name: creatorProfile?.name || 'Squad Lead',
+                username: creatorProfile?.username || 'leader',
+                avatar: creatorProfile?.avatar_url,
+                dayReached: 1,
+                role: 'creator',
+              }
+            ],
+          };
+        });
+
+        const localSquads = StorageService.getSquads() || [];
+        const remoteSquadIds = new Set(mappedSquads.map(s => s.id));
+        const mergedSquads = [...mappedSquads, ...localSquads.filter(s => !remoteSquadIds.has(s.id))];
+        setSquads(mergedSquads);
+        StorageService.saveSquads(mergedSquads);
+      }
     } catch (e) {
       console.warn('Supabase query exception (proceeding with clean local state):', e);
     } finally {
@@ -386,16 +502,21 @@ export default function App() {
     // Immediate initial fetch for all visitors
     fetchSupabaseData();
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
         const u = session.user;
         const meta = u.user_metadata || {};
-        const derivedName = meta.name || meta.full_name || u.email?.split('@')[0] || 'Daily Builder';
-        const derivedUsername = meta.username || u.email?.split('@')[0]?.toLowerCase().replace(/[^a-z0-9_.]/g, '') || 'builder';
-        const savedUser = StorageService.getCurrentUser();
-        const derivedAvatar = (savedUser?.avatar && !savedUser.avatar.includes('unsplash'))
-          ? savedUser.avatar
-          : (meta.avatar_url || savedUser?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80');
+
+        // Look up profile in Supabase to load that specific account
+        const { data: dbProfile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', u.id)
+          .maybeSingle();
+
+        const derivedName = dbProfile?.name || meta.name || meta.full_name || u.email?.split('@')[0] || 'Daily Builder';
+        const derivedUsername = dbProfile?.username || meta.username || u.email?.split('@')[0]?.toLowerCase().replace(/[^a-z0-9_.]/g, '') || 'builder';
+        const derivedAvatar = dbProfile?.avatar_url || meta.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80';
 
         const authUser: Author = {
           ...currentUser,
@@ -403,6 +524,10 @@ export default function App() {
           name: derivedName,
           username: derivedUsername,
           avatar: derivedAvatar,
+          bio: dbProfile?.bio || meta.bio || '',
+          followersCount: dbProfile?.followers_count || 0,
+          followingCount: dbProfile?.following_count || 0,
+          accountabilityHubPrivacy: (dbProfile?.accountability_hub_privacy as any) || 'public',
           isCurrentUser: true,
         };
 
@@ -414,30 +539,33 @@ export default function App() {
           email: u.email,
         });
 
-        // Check if user has already completed onboarding profile setup
-        const hasCompletedOnboarding = StorageService.isOnboardingCompleted() || meta.onboarding_completed === true;
-        if (hasCompletedOnboarding) {
+        // If user already has an account, immediately load main app
+        const hasExistingAccount = Boolean(dbProfile?.username || meta.onboarding_completed || StorageService.isOnboardingCompleted());
+        if (hasExistingAccount) {
           StorageService.setOnboardingCompleted(true);
           setIsOnboardingDone(true);
           fetchSupabaseData(u.id);
         } else {
-          // Keep onboarding active so Google login presents Screen 2 for choosing name & unique handle
           StorageService.setOnboardingCompleted(false);
           setIsOnboardingDone(false);
         }
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user) {
         const u = session.user;
         const meta = u.user_metadata || {};
-        const derivedName = meta.name || meta.full_name || u.email?.split('@')[0] || 'Daily Builder';
-        const derivedUsername = meta.username || u.email?.split('@')[0]?.toLowerCase().replace(/[^a-z0-9_.]/g, '') || 'builder';
-        const savedUser = StorageService.getCurrentUser();
-        const derivedAvatar = (savedUser?.avatar && !savedUser.avatar.includes('unsplash'))
-          ? savedUser.avatar
-          : (meta.avatar_url || savedUser?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80');
+
+        const { data: dbProfile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', u.id)
+          .maybeSingle();
+
+        const derivedName = dbProfile?.name || meta.name || meta.full_name || u.email?.split('@')[0] || 'Daily Builder';
+        const derivedUsername = dbProfile?.username || meta.username || u.email?.split('@')[0]?.toLowerCase().replace(/[^a-z0-9_.]/g, '') || 'builder';
+        const derivedAvatar = dbProfile?.avatar_url || meta.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80';
 
         const authUser: Author = {
           ...currentUser,
@@ -445,6 +573,10 @@ export default function App() {
           name: derivedName,
           username: derivedUsername,
           avatar: derivedAvatar,
+          bio: dbProfile?.bio || meta.bio || '',
+          followersCount: dbProfile?.followers_count || 0,
+          followingCount: dbProfile?.following_count || 0,
+          accountabilityHubPrivacy: (dbProfile?.accountability_hub_privacy as any) || 'public',
           isCurrentUser: true,
         };
 
@@ -456,27 +588,81 @@ export default function App() {
           email: u.email,
         });
 
-        const hasCompletedOnboarding = StorageService.isOnboardingCompleted() || meta.onboarding_completed === true;
-        if (hasCompletedOnboarding) {
+        const hasExistingAccount = Boolean(dbProfile?.username || meta.onboarding_completed || StorageService.isOnboardingCompleted());
+        if (hasExistingAccount) {
           StorageService.setOnboardingCompleted(true);
           setIsOnboardingDone(true);
           fetchSupabaseData(u.id);
-          showToast(`Authenticated with Supabase as ${derivedName}!`);
-        } else {
-          // Keep onboarding active so user completes Screen 2 (name, handle, bio)
-          StorageService.setOnboardingCompleted(false);
-          setIsOnboardingDone(false);
-          showToast(`Signed in with Google! Set your unique handle to finalize.`);
         }
       } else if (event === 'SIGNED_OUT') {
         StorageService.setOnboardingCompleted(false);
         setIsOnboardingDone(false);
-        showToast('Signed out of Supabase session.');
       }
     });
 
+    // Window focus and visibility listener: immediately re-fetch fresh data when switching between tabs/windows
+    const handleRefreshOnFocusOrVisibility = () => {
+      if (!document.hidden) {
+        fetchSupabaseData();
+      }
+    };
+    window.addEventListener('focus', handleRefreshOnFocusOrVisibility);
+    document.addEventListener('visibilitychange', handleRefreshOnFocusOrVisibility);
+
+    // Periodic background sync (every 12 seconds) so cross-account likes, challenges, squads stay fully up to date
+    const liveSyncInterval = setInterval(() => {
+      if (!document.hidden) {
+        fetchSupabaseData();
+      }
+    }, 12000);
+
+    // Supabase Realtime channel for live likes, posts, challenges, squads, notifications across all accounts
+    const realtimeChannel = supabase
+      .channel('daily_realtime_sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, () => {
+        fetchSupabaseData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'post_likes' }, () => {
+        fetchSupabaseData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'post_comments' }, () => {
+        fetchSupabaseData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'post_bookmarks' }, () => {
+        fetchSupabaseData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'challenges' }, () => {
+        fetchSupabaseData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'challenge_participants' }, () => {
+        fetchSupabaseData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, () => {
+        fetchSupabaseData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'squads' }, () => {
+        fetchSupabaseData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'squad_members' }, () => {
+        fetchSupabaseData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'communities' }, () => {
+        fetchSupabaseData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'community_members' }, () => {
+        fetchSupabaseData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'todos' }, () => {
+        fetchSupabaseData();
+      })
+      .subscribe();
+
     return () => {
       subscription.unsubscribe();
+      window.removeEventListener('focus', handleRefreshOnFocusOrVisibility);
+      document.removeEventListener('visibilitychange', handleRefreshOnFocusOrVisibility);
+      clearInterval(liveSyncInterval);
+      supabase.removeChannel(realtimeChannel);
     };
   }, []);
 
@@ -656,12 +842,13 @@ export default function App() {
       return updated;
     });
 
-    // Persist user likes locally
-    const userLikes = StorageService.getUserLikes();
+    // Persist user likes locally (namespaced by user id)
+    const activeUid = currentUser?.id;
+    const userLikes = StorageService.getUserLikes(activeUid);
     const updatedLikes = nextIsLiked
       ? Array.from(new Set([...userLikes, postId]))
       : userLikes.filter((id) => id !== postId);
-    StorageService.saveUserLikes(updatedLikes);
+    StorageService.saveUserLikes(updatedLikes, activeUid);
 
     // Sync with Supabase database
     try {
@@ -714,12 +901,13 @@ export default function App() {
       return updated;
     });
 
-    // Persist user bookmarks locally
-    const userBookmarks = StorageService.getUserBookmarks();
+    // Persist user bookmarks locally (namespaced by user id)
+    const activeUid = currentUser?.id;
+    const userBookmarks = StorageService.getUserBookmarks(activeUid);
     const updatedBookmarks = nextIsSaved
       ? Array.from(new Set([...userBookmarks, postId]))
       : userBookmarks.filter((id) => id !== postId);
-    StorageService.saveUserBookmarks(updatedBookmarks);
+    StorageService.saveUserBookmarks(updatedBookmarks, activeUid);
 
     showToast(nextIsSaved ? 'Post saved to your profile' : 'Post removed from saved');
 
@@ -1139,6 +1327,9 @@ export default function App() {
           user_id: activeUserId,
           current_progress: 1,
         });
+
+        // Immediately refresh state
+        fetchSupabaseData(activeUserId);
       }
     } catch (err) {
       console.warn('Supabase challenge creation notice:', err);
@@ -1164,9 +1355,10 @@ export default function App() {
   };
 
   // Squad Management Handlers
-  const handleCreateSquad = (data: Partial<Squad>) => {
+  const handleCreateSquad = async (data: Partial<Squad>) => {
+    const squadId = getSafeUUID();
     const newSquad: Squad = {
-      id: `squad_${Date.now()}`,
+      id: squadId,
       name: data.name || 'New Squad',
       category: data.category || 'fitness',
       requiredSize: data.requiredSize || 5,
@@ -1190,67 +1382,91 @@ export default function App() {
     };
 
     setSquads(prev => [newSquad, ...prev]);
-
-    // Send invitations to invited members
-    (data.members || []).forEach(m => {
-      if (m.username !== currentUser.username) {
-        const notif: NotificationItem = {
-          id: `notif_sq_${Date.now()}_${m.username}`,
-          user: currentUser,
-          action: `invited you to join squad "${newSquad.name}"`,
-          target: `For ${newSquad.challengeTitle || 'Sprint'} (${newSquad.members.length}/${newSquad.requiredSize} members)`,
-          time: 'Just now',
-          read: false,
-          type: 'squad_invitation',
-          squadInvitation: {
-            squadId: newSquad.id,
-            squadName: newSquad.name,
-            challengeTitle: newSquad.challengeTitle || 'Squad Sprint',
-            requiredMembers: newSquad.requiredSize,
-            status: 'pending',
-          }
-        };
-        setNotifications(prev => [notif, ...prev]);
-      }
-    });
-
     showToast(`🎉 Squad "${newSquad.name}" created! Invitations sent.`);
+
+    // Persist to Supabase and send notifications to recipient accounts
+    try {
+      let activeUserId: string | undefined = currentUser?.id;
+      if (!isValidUUID(activeUserId)) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        activeUserId = sessionData?.session?.user?.id;
+      }
+
+      if (activeUserId && isValidUUID(activeUserId)) {
+        // Insert squad
+        await supabase.from('squads').insert({
+          id: squadId,
+          name: newSquad.name,
+          category: newSquad.category,
+          challenge_id: isValidUUID(newSquad.challengeId) ? newSquad.challengeId : null,
+          required_size: newSquad.requiredSize,
+          creator_id: activeUserId,
+        });
+
+        // Insert creator into squad_members
+        await supabase.from('squad_members').insert({
+          squad_id: squadId,
+          user_id: activeUserId,
+          day_reached: 1,
+          role: 'creator',
+        });
+
+        // Send notifications to each invited member
+        for (const m of (data.members || [])) {
+          if (m.username && m.username !== currentUser.username) {
+            let targetUserId = m.id;
+            if (!isValidUUID(targetUserId)) {
+              const { data: targetProfile } = await supabase
+                .from('profiles')
+                .select('id')
+                .ilike('username', m.username.replace(/^@/, ''))
+                .maybeSingle();
+              if (targetProfile?.id) {
+                targetUserId = targetProfile.id;
+              }
+            }
+
+            if (isValidUUID(targetUserId)) {
+              const notifPayload = {
+                id: getSafeUUID(),
+                recipient_id: targetUserId,
+                sender_id: activeUserId,
+                type: 'squad_invitation',
+                action: `invited you to join squad "${newSquad.name}"`,
+                target: `For ${newSquad.challengeTitle || 'Sprint'} (${newSquad.members.length}/${newSquad.requiredSize} members)`,
+                squad_id: isValidUUID(squadId) ? squadId : null,
+                read: false,
+              };
+              const { error: notifErr } = await supabase.from('notifications').insert(notifPayload);
+              if (notifErr) {
+                console.warn('Squad notification insert with squad_id notice:', notifErr.message);
+                await supabase.from('notifications').insert({ ...notifPayload, squad_id: null });
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Supabase squad creation notice:', err);
+    }
   };
 
-  const handleInviteMemberToSquad = (squadId: string, username: string) => {
+  const handleInviteMemberToSquad = async (squadId: string, username: string) => {
     const targetSquad = squads.find(s => s.id === squadId);
     if (!targetSquad) return;
 
-    const foundUser = allCreators.find(u => u.username === username);
+    const cleanUsername = username.replace(/^@/, '').toLowerCase();
+    const foundUser = allCreators.find(u => u.username.toLowerCase() === cleanUsername);
     const newMember: Author = foundUser || {
-      id: `u_${username}`,
-      name: username,
-      username: username,
+      id: `u_${cleanUsername}`,
+      name: cleanUsername,
+      username: cleanUsername,
       avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
     };
 
-    // Send squad invitation notification
-    const newNotif: NotificationItem = {
-      id: `notif_invite_${Date.now()}`,
-      user: currentUser,
-      action: `invited you to join squad "${targetSquad.name}"`,
-      target: `For ${targetSquad.challengeTitle || 'Challenge Sprint'} (${targetSquad.members.length + 1}/${targetSquad.requiredSize} members)`,
-      time: 'Just now',
-      read: false,
-      type: 'squad_invitation',
-      squadInvitation: {
-        squadId: targetSquad.id,
-        squadName: targetSquad.name,
-        challengeTitle: targetSquad.challengeTitle || 'Squad Sprint',
-        requiredMembers: targetSquad.requiredSize,
-        status: 'pending',
-      }
-    };
-    setNotifications(prev => [newNotif, ...prev]);
-
-    // Add to squad roster
+    // Add to squad roster locally
     setSquads(prev => prev.map(sq => {
-      if (sq.id === squadId && !sq.members.some(m => m.username === username)) {
+      if (sq.id === squadId && !sq.members.some(m => m.username.toLowerCase() === cleanUsername)) {
         return {
           ...sq,
           members: [
@@ -1269,7 +1485,54 @@ export default function App() {
       return sq;
     }));
 
-    showToast(`✉️ Squad invitation sent to @${username}!`);
+    showToast(`✉️ Squad invitation sent to @${cleanUsername}!`);
+
+    // Send squad invitation notification to target recipient in Supabase
+    try {
+      let activeUserId: string | undefined = currentUser?.id;
+      if (!isValidUUID(activeUserId)) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        activeUserId = sessionData?.session?.user?.id;
+      }
+
+      if (activeUserId && isValidUUID(activeUserId)) {
+        let targetRecipientId: string | undefined = (foundUser?.id && isValidUUID(foundUser.id)) ? foundUser.id : undefined;
+
+        if (!targetRecipientId) {
+          const { data: recipientProfile } = await supabase
+            .from('profiles')
+            .select('id')
+            .ilike('username', cleanUsername)
+            .maybeSingle();
+
+          if (recipientProfile?.id && isValidUUID(recipientProfile.id)) {
+            targetRecipientId = recipientProfile.id;
+          }
+        }
+
+        if (targetRecipientId && isValidUUID(targetRecipientId)) {
+          const notifPayload = {
+            id: getSafeUUID(),
+            recipient_id: targetRecipientId,
+            sender_id: activeUserId,
+            type: 'squad_invitation',
+            action: `invited you to join squad "${targetSquad.name}"`,
+            target: `For ${targetSquad.challengeTitle || 'Challenge Sprint'} (${targetSquad.members.length + 1}/${targetSquad.requiredSize} members)`,
+            squad_id: isValidUUID(squadId) ? squadId : null,
+            read: false,
+          };
+
+          const { error: notifErr } = await supabase.from('notifications').insert(notifPayload);
+          if (notifErr) {
+            console.warn('Supabase squad invite notification with squad_id notice:', notifErr.message);
+            // Fallback retry without squad_id if foreign key or relation caused issue
+            await supabase.from('notifications').insert({ ...notifPayload, squad_id: null });
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Supabase squad invite notification notice:', err);
+    }
   };
 
   const handleEnterChallengeWithSquad = (squadId: string, challengeId: string) => {
@@ -1351,7 +1614,7 @@ export default function App() {
     }));
   };
 
-  const handleAcceptSquadInvite = (squadId: string, notifId: string) => {
+  const handleAcceptSquadInvite = async (squadId: string, notifId: string) => {
     setNotifications(prev => prev.map(n => {
       if (n.id === notifId && n.squadInvitation) {
         return {
@@ -1387,9 +1650,25 @@ export default function App() {
     }));
 
     showToast(`✓ Accepted squad invitation! You joined the roster.`);
+
+    try {
+      if (isValidUUID(notifId)) {
+        await supabase.from('notifications').update({ read: true }).eq('id', notifId);
+      }
+      if (isValidUUID(squadId) && isValidUUID(currentUser.id)) {
+        await supabase.from('squad_members').upsert({
+          squad_id: squadId,
+          user_id: currentUser.id,
+          day_reached: 1,
+          role: 'member',
+        });
+      }
+    } catch (err) {
+      console.warn('Squad invite acceptance sync notice:', err);
+    }
   };
 
-  const handleDeclineSquadInvite = (squadId: string, notifId: string) => {
+  const handleDeclineSquadInvite = async (squadId: string, notifId: string) => {
     setNotifications(prev => prev.map(n => {
       if (n.id === notifId && n.squadInvitation) {
         return {
@@ -1404,6 +1683,14 @@ export default function App() {
       return n;
     }));
     showToast(`Squad invitation declined.`);
+
+    try {
+      if (isValidUUID(notifId)) {
+        await supabase.from('notifications').update({ read: true }).eq('id', notifId);
+      }
+    } catch (err) {
+      console.warn('Squad invite decline sync notice:', err);
+    }
   };
 
   // Interactions: Toggle Community Join
@@ -1886,6 +2173,8 @@ export default function App() {
             onOpenShare={(post) => setSelectedPostForShare(post)}
             onNavigateAuthorProfile={(author) => handleNavigateToUser(author)}
             onToggleFollow={handleToggleFollow}
+            onRefresh={() => fetchSupabaseData(currentUser.id)}
+            isRefreshingSupabase={isLoadingSupabase}
           />
         );
       case 'challenges':

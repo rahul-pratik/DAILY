@@ -1144,14 +1144,14 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-xs font-semibold text-white">
-                    Squad Capacity
+                    Squad Capacity (Total Members)
                   </label>
                   <span className="text-xs text-[#3B82FF] font-mono font-bold">
                     {newSquadRequiredSize} Members Required
                   </span>
                 </div>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {[3, 5, 8, 10].map((size) => (
+                <div className="grid grid-cols-5 gap-1.5 mb-2">
+                  {[2, 3, 5, 8, 10].map((size) => (
                     <button
                       key={size}
                       type="button"
@@ -1165,6 +1165,25 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                       {size}
                     </button>
                   ))}
+                </div>
+                {/* Custom member count input */}
+                <div className="flex items-center gap-2 bg-[#121622] border border-[#202738] rounded-xl px-3 py-1.5 focus-within:border-[#2166FF]">
+                  <span className="text-[11px] text-[#8A92A6]">Custom total members:</span>
+                  <input
+                    type="number"
+                    min={2}
+                    max={100}
+                    value={newSquadRequiredSize}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (!isNaN(val) && val >= 1) {
+                        setNewSquadRequiredSize(val);
+                      }
+                    }}
+                    placeholder="e.g. 4, 6, 7, 12..."
+                    className="w-20 bg-transparent text-xs text-white font-mono font-bold outline-none"
+                  />
+                  <span className="text-[10px] text-[#555E70] ml-auto">Any number</span>
                 </div>
               </div>
 

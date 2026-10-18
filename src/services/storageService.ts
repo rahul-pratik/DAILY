@@ -136,20 +136,27 @@ export const StorageService = {
     safeSet(KEYS.SQUADS, squads);
   },
 
-  // User Likes & Bookmarks
-  getUserLikes(): string[] {
-    return safeParse<string[]>('daily_app_user_likes', []);
+  // User Likes & Bookmarks (namespaced per user to prevent cross-account overlap)
+  getUserLikes(userId?: string): string[] {
+    const key = userId ? `daily_app_user_likes_${userId}` : 'daily_app_user_likes';
+    return safeParse<string[]>(key, []);
   },
 
-  saveUserLikes(likedPostIds: string[]): void {
+  saveUserLikes(likedPostIds: string[], userId?: string): void {
+    const key = userId ? `daily_app_user_likes_${userId}` : 'daily_app_user_likes';
+    safeSet(key, likedPostIds);
+    // Also mirror to generic key for backward compatibility
     safeSet('daily_app_user_likes', likedPostIds);
   },
 
-  getUserBookmarks(): string[] {
-    return safeParse<string[]>('daily_app_user_bookmarks', []);
+  getUserBookmarks(userId?: string): string[] {
+    const key = userId ? `daily_app_user_bookmarks_${userId}` : 'daily_app_user_bookmarks';
+    return safeParse<string[]>(key, []);
   },
 
-  saveUserBookmarks(bookmarkedPostIds: string[]): void {
+  saveUserBookmarks(bookmarkedPostIds: string[], userId?: string): void {
+    const key = userId ? `daily_app_user_bookmarks_${userId}` : 'daily_app_user_bookmarks';
+    safeSet(key, bookmarkedPostIds);
     safeSet('daily_app_user_bookmarks', bookmarkedPostIds);
   },
 

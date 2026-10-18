@@ -10,15 +10,18 @@ import {
   Loader2,
   CheckCircle2,
   Sparkles,
-  KeyRound,
   Eye,
   EyeOff,
   Check,
-  ShieldCheck
+  ShieldCheck,
+  Camera,
+  Crop,
+  Upload
 } from 'lucide-react';
 import { Author } from '../../types';
-import { supabase, syncProfileToSupabase, isValidUUID } from '../../lib/supabase';
+import { supabase, syncProfileToSupabase, isValidUUID, uploadMediaToSupabase } from '../../lib/supabase';
 import { OTHER_USERS } from '../../data/initialData';
+import { ImageCropModal } from '../modals/ImageCropModal';
 
 interface OnboardingAuthScreenProps {
   onComplete: (user: Author, selectedInterests: string[], authSession?: { provider: 'google' | 'email' | 'guest'; email?: string }) => void;
@@ -54,6 +57,11 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
   const [userId, setUserId] = useState<string>(initialUser?.id || `user_${Date.now()}`);
   const [googleUserNote, setGoogleUserNote] = useState<string | null>(null);
 
+  // Avatar upload and cropping state
+  const [isCropModalOpen, setIsCropModalOpen] = useState(false);
+  const [rawImageForCrop, setRawImageForCrop] = useState<string>('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Real-time unique username validation state
   const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'available' | 'taken' | 'invalid'>('idle');
   const [usernameMessage, setUsernameMessage] = useState<string | null>(null);
@@ -66,17 +74,71 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
     ...Object.values(OTHER_USERS).map((u) => u.username.toLowerCase())
   ]);
 
-  // Check if user is already authenticated via Supabase session (e.g. redirected from Google OAuth)
+  // Handle returning from Google OAuth or window focus reset if user closed popup without completing
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    let resetTimer: any = null;
+
+    const handleWindowFocusOrVisibility = async () => {
+      if (authLoading && authProvider === 'google') {
+        resetTimer = setTimeout(async () => {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session?.user) {
+            setAuthLoading(false);
+          }
+        }, 1200);
+      }
+    };
+
+    window.addEventListener('focus', handleWindowFocusOrVisibility);
+    document.addEventListener('visibilitychange', handleWindowFocusOrVisibility);
+
+    return () => {
+      window.removeEventListener('focus', handleWindowFocusOrVisibility);
+      document.removeEventListener('visibilitychange', handleWindowFocusOrVisibility);
+      if (resetTimer) clearTimeout(resetTimer);
+    };
+  }, [authLoading, authProvider]);
+
+  // Check if user is already authenticated via Supabase session
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
         const u = session.user;
         setUserId(u.id);
         const meta = u.user_metadata || {};
+        const provider = (u.app_metadata?.provider as any) || 'google';
+
+        // Check if user already has an existing profile in public.profiles table
+        const { data: dbProfile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', u.id)
+          .maybeSingle();
+
+        if (dbProfile && (dbProfile.username || meta.onboarding_completed)) {
+          // User already has an account! Load that specific account and redirect immediately to the main app!
+          const loadedUser: Author = {
+            id: u.id,
+            name: dbProfile.name || meta.name || 'Daily Builder',
+            username: dbProfile.username || 'builder',
+            avatar: dbProfile.avatar_url || meta.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+            bio: dbProfile.bio || '',
+            isCurrentUser: true,
+            followersCount: dbProfile.followers_count || 0,
+            followingCount: dbProfile.following_count || 0,
+            accountabilityHubPrivacy: (dbProfile.accountability_hub_privacy as any) || 'public',
+          };
+
+          onComplete(loadedUser, ['Coding & Tech', 'Startups & SaaS', 'Daily Habits'], {
+            provider,
+            email: u.email,
+          });
+          return;
+        }
+
         const derivedName = meta.name || meta.full_name || u.email?.split('@')[0] || '';
         const rawHandle = meta.username || u.email?.split('@')[0]?.toLowerCase().replace(/[^a-z0-9_.]/g, '') || '';
         const derivedAvatar = meta.avatar_url || '';
-        const provider = (u.app_metadata?.provider as any) || 'google';
 
         if (derivedName) setName(derivedName);
         if (derivedAvatar) setAvatarUrl(derivedAvatar);
@@ -92,7 +154,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
           checkUsernameAvailability(rawHandle, u.id);
         }
 
-        // Advance to Screen 2 to prompt for custom Name, Username, and Bio
+        // Advance to Screen 2 to prompt for custom Name, Username, and Bio for new signups
         setScreen(2);
       }
     });
@@ -186,6 +248,14 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
     setAuthSuccessMessage(null);
     setAuthProvider('google');
 
+    // Safety timeout: if popup closes or user navigates back without completing, reset loading after 6s
+    setTimeout(async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        setAuthLoading(false);
+      }
+    }, 6000);
+
     try {
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -245,16 +315,37 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
 
         if (data?.user) {
           const u = data.user;
-          const derivedName = u.user_metadata?.name || u.user_metadata?.full_name || email.split('@')[0];
-          const derivedUsername = u.user_metadata?.username || email.split('@')[0].toLowerCase().replace(/[^a-z0-9_.]/g, '');
+          // Look up user profile to load that specific account and redirect immediately to the main app!
+          const { data: dbProfile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', u.id)
+            .maybeSingle();
 
-          setUserId(u.id);
-          setName(derivedName);
-          setUsername(derivedUsername);
-          checkUsernameAvailability(derivedUsername, u.id);
-          // Advance to Screen 2 to let the user review and confirm handle
-          setScreen(2);
+          const finalName = dbProfile?.name || u.user_metadata?.name || u.user_metadata?.full_name || email.split('@')[0];
+          const finalUsername = dbProfile?.username || u.user_metadata?.username || email.split('@')[0].toLowerCase().replace(/[^a-z0-9_.]/g, '');
+          const finalAvatar = dbProfile?.avatar_url || u.user_metadata?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80';
+          const finalBio = dbProfile?.bio || u.user_metadata?.bio || 'Building daily consistency and verifiable discipline.';
+
+          const loggedInUser: Author = {
+            id: u.id,
+            name: finalName,
+            username: finalUsername,
+            avatar: finalAvatar,
+            bio: finalBio,
+            isCurrentUser: true,
+            isFollowing: false,
+            followersCount: dbProfile?.followers_count || 0,
+            followingCount: dbProfile?.following_count || 0,
+            accountabilityHubPrivacy: (dbProfile?.accountability_hub_privacy as any) || 'public',
+          };
+
           setAuthLoading(false);
+          // Redirect immediately to the main app!
+          onComplete(loggedInUser, ['Coding & Tech', 'Startups & SaaS', 'Daily Habits'], {
+            provider: 'email',
+            email: u.email,
+          });
           return;
         }
       } else {
@@ -303,37 +394,6 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
     }
   };
 
-  // Passwordless Magic Link fallback
-  const handleSendMagicLink = async () => {
-    if (!email.trim()) {
-      setAuthError('Please enter your email address to receive a magic login link.');
-      return;
-    }
-
-    setAuthLoading(true);
-    setAuthError(null);
-    setAuthSuccessMessage(null);
-
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim(),
-        options: {
-          emailRedirectTo: window.location.origin,
-        },
-      });
-
-      if (error) {
-        setAuthError(error.message);
-      } else {
-        setAuthSuccessMessage(`Magic login link sent to ${email}! Check your inbox to sign in.`);
-      }
-    } catch (err: any) {
-      setAuthError(err.message || 'Failed to send magic link.');
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
   // Screen 2: Finish Onboarding & Save Unique Profile
   const handleFinish = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -356,6 +416,8 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
     setAuthLoading(true);
     setAuthError(null);
 
+    let resolvedAvatar = finalAvatar;
+
     try {
       // Re-verify uniqueness against public.profiles right before saving
       const { data: { session } } = await supabase.auth.getSession();
@@ -377,13 +439,22 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
         }
       }
 
+      // Upload cropped avatar to Supabase Storage if it is a Data URL
+      if (finalAvatar.startsWith('data:') && activeUserId) {
+        try {
+          resolvedAvatar = await uploadMediaToSupabase('avatars', finalAvatar, `avatar_${activeUserId}`);
+        } catch {
+          resolvedAvatar = finalAvatar;
+        }
+      }
+
       // Sync profile to Supabase public.profiles table
       if (activeUserId) {
         await syncProfileToSupabase({
           id: activeUserId,
           name: finalName,
           username: finalUsername,
-          avatar: finalAvatar,
+          avatar: resolvedAvatar,
           bio: finalBio,
         });
 
@@ -394,8 +465,8 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
           bio: finalBio,
           onboarding_completed: true,
         };
-        if (finalAvatar.startsWith('http')) {
-          metaUpdate.avatar_url = finalAvatar;
+        if (resolvedAvatar.startsWith('http')) {
+          metaUpdate.avatar_url = resolvedAvatar;
         }
         await supabase.auth.updateUser({
           data: metaUpdate,
@@ -410,7 +481,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
       id: effectiveId,
       name: finalName,
       username: finalUsername,
-      avatar: finalAvatar,
+      avatar: resolvedAvatar,
       bio: finalBio,
       isCurrentUser: true,
       isFollowing: false,
@@ -559,6 +630,16 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                 <span>Continue with Google</span>
               </button>
 
+              {authLoading && authProvider === 'google' && (
+                <button
+                  type="button"
+                  onClick={() => setAuthLoading(false)}
+                  className="w-full py-1 text-[11px] text-[#8A92A6] hover:text-white underline cursor-pointer text-center transition-colors"
+                >
+                  Cancel Google Sign In
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={handleAppleLogin}
@@ -585,6 +666,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                   onClick={() => {
                     setAuthMode('signup');
                     setAuthError(null);
+                    setAuthLoading(false);
                   }}
                   className={`flex-1 py-1 rounded-lg font-medium transition-colors cursor-pointer ${
                     authMode === 'signup' ? 'bg-[#2166FF] text-white shadow-sm' : 'text-[#8A92A6] hover:text-white'
@@ -597,6 +679,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                   onClick={() => {
                     setAuthMode('login');
                     setAuthError(null);
+                    setAuthLoading(false);
                   }}
                   className={`flex-1 py-1 rounded-lg font-medium transition-colors cursor-pointer ${
                     authMode === 'login' ? 'bg-[#2166FF] text-white shadow-sm' : 'text-[#8A92A6] hover:text-white'
@@ -613,7 +696,13 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                   type="email"
                   required
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onFocus={() => {
+                    if (authProvider === 'google') setAuthLoading(false);
+                  }}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (authProvider === 'google') setAuthLoading(false);
+                  }}
                   placeholder="name@email.com"
                   className="w-full pl-9 pr-3 py-2.5 bg-[#121620] border border-[#202738] focus:border-[#2166FF] rounded-xl text-xs text-white placeholder-[#555E70] outline-none transition-colors"
                 />
@@ -627,7 +716,13 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                   required
                   minLength={6}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onFocus={() => {
+                    if (authProvider === 'google') setAuthLoading(false);
+                  }}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    if (authProvider === 'google') setAuthLoading(false);
+                  }}
                   placeholder="Password (minimum 6 characters)"
                   className="w-full pl-9 pr-10 py-2.5 bg-[#121620] border border-[#202738] focus:border-[#2166FF] rounded-xl text-xs text-white placeholder-[#555E70] outline-none transition-colors"
                 />
@@ -651,41 +746,12 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                   <Loader2 size={15} className="animate-spin text-white" />
                 ) : (
                   <>
-                    <span>{authMode === 'signup' ? 'Create Account with Supabase' : 'Log In with Supabase'}</span>
+                    <span>{authMode === 'signup' ? 'Create Account' : 'Log In'}</span>
                     <ArrowRight size={14} />
                   </>
                 )}
               </button>
-
-              <div className="flex items-center justify-between text-[11px] pt-1">
-                <button
-                  type="button"
-                  onClick={handleSendMagicLink}
-                  disabled={authLoading}
-                  className="text-[#3B82FF] hover:underline flex items-center gap-1 cursor-pointer"
-                >
-                  <KeyRound size={12} />
-                  <span>Send Magic Login Link</span>
-                </button>
-
-                <span className="text-[#555E70] font-mono text-[10px]">
-                  Supabase Auth Active
-                </span>
-              </div>
             </form>
-
-            <div className="text-center pt-1 border-t border-[#1C2230]/60">
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthProvider('guest');
-                  setScreen(2);
-                }}
-                className="text-[11px] text-[#8A92A6] hover:text-white underline cursor-pointer"
-              >
-                Continue as Guest / Demo Mode
-              </button>
-            </div>
           </div>
         )}
 
@@ -722,23 +788,80 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
               </div>
             )}
 
-            {/* Avatar Preview */}
-            <div className="flex items-center gap-3 p-3 rounded-2xl bg-[#121620] border border-[#202738]">
-              <img
-                src={avatarUrl}
-                alt="Avatar"
-                className="w-12 h-12 rounded-full object-cover border-2 border-[#2166FF]"
-                referrerPolicy="no-referrer"
-              />
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-white truncate">{name || 'Your Name'}</p>
-                <p className="text-[11px] font-mono text-[#3B82FF] truncate">
-                  @{username || 'handle'}
-                </p>
-                <p className="text-[10px] text-[#717B90]">
-                  {authProvider === 'google' ? 'Google Account Avatar' : 'Default Builder Avatar'}
-                </p>
+            {/* Avatar Preview & Attachment / Cropping */}
+            <div className="p-3.5 rounded-2xl bg-[#121620] border border-[#202738] space-y-2.5">
+              <div className="flex items-center gap-3">
+                <div className="relative group shrink-0">
+                  <img
+                    src={avatarUrl}
+                    alt="Avatar"
+                    className="w-14 h-14 rounded-full object-cover border-2 border-[#2166FF] shadow-md"
+                    referrerPolicy="no-referrer"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    title="Change profile picture"
+                    className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity cursor-pointer text-white"
+                  >
+                    <Camera size={16} />
+                  </button>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-bold text-white truncate">{name || 'Your Name'}</p>
+                  <p className="text-[11px] font-mono text-[#3B82FF] truncate">
+                    @{username || 'handle'}
+                  </p>
+                  <p className="text-[10px] text-[#717B90]">
+                    Upload custom photo or crop to 1:1 circle
+                  </p>
+                </div>
               </div>
+
+              {/* Upload & Crop Action Buttons */}
+              <div className="flex items-center gap-2 pt-1 border-t border-[#1C2230]">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex-1 py-1.5 px-2.5 rounded-xl bg-[#181D2A] hover:bg-[#202738] border border-[#2A3348] text-[11px] font-semibold text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Upload size={13} className="text-[#3B82FF]" />
+                  <span>Attach Photo</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRawImageForCrop(avatarUrl);
+                    setIsCropModalOpen(true);
+                  }}
+                  className="flex-1 py-1.5 px-2.5 rounded-xl bg-[#181D2A] hover:bg-[#202738] border border-[#2A3348] text-[11px] font-semibold text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Crop size={13} className="text-[#10B981]" />
+                  <span>Crop Photo</span>
+                </button>
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = (event) => {
+                    const dataUrl = event.target?.result as string;
+                    if (dataUrl) {
+                      setRawImageForCrop(dataUrl);
+                      setIsCropModalOpen(true);
+                    }
+                  };
+                  reader.readAsDataURL(file);
+                  e.target.value = '';
+                }}
+              />
             </div>
 
             <div className="space-y-3">
@@ -875,6 +998,19 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
         )}
 
       </div>
+
+      {/* Profile Picture Crop Modal */}
+      <ImageCropModal
+        isOpen={isCropModalOpen}
+        imageUrl={rawImageForCrop || avatarUrl}
+        title="Crop Profile Avatar"
+        mode="avatar"
+        onCropComplete={(croppedDataUrl) => {
+          setAvatarUrl(croppedDataUrl);
+          setIsCropModalOpen(false);
+        }}
+        onClose={() => setIsCropModalOpen(false)}
+      />
     </div>
   );
 };

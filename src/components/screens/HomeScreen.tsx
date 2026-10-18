@@ -1,5 +1,16 @@
-import React, { useState } from 'react';
-import { Heart, MessageSquare, Bookmark, Share2, MoreHorizontal, Sparkles } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Heart, 
+  MessageSquare, 
+  Bookmark, 
+  Share2, 
+  MoreHorizontal, 
+  Sparkles,
+  RefreshCw,
+  ArrowDown,
+  CheckCircle2,
+  Loader2
+} from 'lucide-react';
 import { Author, Post } from '../../types';
 
 interface HomeScreenProps {
@@ -13,6 +24,8 @@ interface HomeScreenProps {
   onOpenShare?: (post: Post) => void;
   onNavigateAuthorProfile?: (author: Author) => void;
   onToggleFollow?: (userId: string) => void;
+  onRefresh?: () => Promise<void> | void;
+  isRefreshingSupabase?: boolean;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
@@ -26,20 +39,214 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onOpenShare,
   onNavigateAuthorProfile,
   onToggleFollow,
+  onRefresh,
+  isRefreshingSupabase = false,
 }) => {
   const [activeFilter, setActiveFilter] = useState<'for_you' | 'following' | 'recent'>('for_you');
+
+  // Pull-to-refresh states
+  const [pullDistance, setPullDistance] = useState(0);
+  const [isPulling, setIsPulling] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshSuccess, setRefreshSuccess] = useState(false);
+  const touchStartY = useRef<number | null>(null);
+  const isDraggingMouse = useRef<boolean>(false);
+  const mouseStartY = useRef<number | null>(null);
+
+  const PULL_THRESHOLD = 65;
+
+  // Sync external loading state with local refreshing
+  useEffect(() => {
+    if (!isRefreshingSupabase && isRefreshing && !refreshSuccess) {
+      setRefreshSuccess(true);
+      const timer = setTimeout(() => {
+        setRefreshSuccess(false);
+        setPullDistance(0);
+        setIsRefreshing(false);
+        setIsPulling(false);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [isRefreshingSupabase]);
+
+  // Touch pull-down handler for mobile devices
+  useEffect(() => {
+    const handleTouchStart = (e: TouchEvent) => {
+      if (window.scrollY <= 5 && !isRefreshing) {
+        touchStartY.current = e.touches[0].clientY;
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (touchStartY.current !== null && window.scrollY <= 5 && !isRefreshing) {
+        const deltaY = e.touches[0].clientY - touchStartY.current;
+        if (deltaY > 0) {
+          const damped = Math.min(deltaY * 0.45, 110);
+          setPullDistance(damped);
+          setIsPulling(true);
+        }
+      }
+    };
+
+    const handleTouchEnd = async () => {
+      if (touchStartY.current === null) return;
+      touchStartY.current = null;
+
+      if (pullDistance >= PULL_THRESHOLD && !isRefreshing) {
+        setIsRefreshing(true);
+        setPullDistance(55);
+        try {
+          if (onRefresh) {
+            await onRefresh();
+          }
+          setRefreshSuccess(true);
+          setTimeout(() => {
+            setRefreshSuccess(false);
+            setPullDistance(0);
+            setIsRefreshing(false);
+            setIsPulling(false);
+          }, 600);
+        } catch {
+          setPullDistance(0);
+          setIsRefreshing(false);
+          setIsPulling(false);
+        }
+      } else {
+        setPullDistance(0);
+        setIsPulling(false);
+      }
+    };
+
+    window.addEventListener('touchstart', handleTouchStart, { passive: true });
+    window.addEventListener('touchmove', handleTouchMove, { passive: true });
+    window.addEventListener('touchend', handleTouchEnd, { passive: true });
+
+    return () => {
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [pullDistance, isRefreshing, onRefresh]);
+
+  // Desktop mouse drag pull-down support
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (window.scrollY <= 5 && !isRefreshing) {
+      isDraggingMouse.current = true;
+      mouseStartY.current = e.clientY;
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (isDraggingMouse.current && mouseStartY.current !== null && window.scrollY <= 5 && !isRefreshing) {
+      const deltaY = e.clientY - mouseStartY.current;
+      if (deltaY > 0) {
+        const damped = Math.min(deltaY * 0.45, 110);
+        setPullDistance(damped);
+        setIsPulling(true);
+      }
+    }
+  };
+
+  const handleMouseUp = async () => {
+    if (!isDraggingMouse.current) return;
+    isDraggingMouse.current = false;
+    mouseStartY.current = null;
+
+    if (pullDistance >= PULL_THRESHOLD && !isRefreshing) {
+      setIsRefreshing(true);
+      setPullDistance(55);
+      try {
+        if (onRefresh) {
+          await onRefresh();
+        }
+        setRefreshSuccess(true);
+        setTimeout(() => {
+          setRefreshSuccess(false);
+          setPullDistance(0);
+          setIsRefreshing(false);
+          setIsPulling(false);
+        }, 600);
+      } catch {
+        setPullDistance(0);
+        setIsRefreshing(false);
+        setIsPulling(false);
+      }
+    } else {
+      setPullDistance(0);
+      setIsPulling(false);
+    }
+  };
+
+  // Explicit button reload trigger
+  const triggerManualReload = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    setPullDistance(55);
+    try {
+      if (onRefresh) {
+        await onRefresh();
+      }
+      setRefreshSuccess(true);
+      setTimeout(() => {
+        setRefreshSuccess(false);
+        setPullDistance(0);
+        setIsRefreshing(false);
+      }, 600);
+    } catch {
+      setPullDistance(0);
+      setIsRefreshing(false);
+    }
+  };
 
   // Filter posts based on active filter
   const filteredPosts = posts.filter((post) => {
     if (activeFilter === 'following') {
-      // In this demo, posts by Sarah and Devin are from accounts followed
       return post.author.username !== currentUser.username;
     }
     return true; // For you / recent
   });
 
   return (
-    <div className="pb-24 pt-1 animate-fade-in">
+    <div 
+      className="pb-24 pt-1 animate-fade-in relative select-none sm:select-auto"
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+    >
+      {/* Pull Down to Reload Indicator Area */}
+      <div
+        className="overflow-hidden transition-[height] duration-200 ease-out flex items-center justify-center bg-[#070A10] border-b border-[#20242C]/40"
+        style={{ height: pullDistance > 0 ? `${pullDistance}px` : '0px' }}
+      >
+        <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#121622] border border-[#202738] shadow-lg text-xs font-semibold">
+          {isRefreshing || isRefreshingSupabase ? (
+            <>
+              <Loader2 size={14} className="animate-spin text-[#3B82FF]" />
+              <span className="text-white">Reloading feed & data...</span>
+            </>
+          ) : refreshSuccess ? (
+            <>
+              <CheckCircle2 size={14} className="text-emerald-400" />
+              <span className="text-emerald-400 font-bold">Feed up to date!</span>
+            </>
+          ) : pullDistance >= PULL_THRESHOLD ? (
+            <>
+              <ArrowDown size={14} className="text-[#3B82FF] -rotate-180 transition-transform duration-200" />
+              <span className="text-[#60A5FA]">Release to reload</span>
+            </>
+          ) : (
+            <>
+              <RefreshCw
+                size={14}
+                className="text-[#9298A3] transition-transform duration-100"
+                style={{ transform: `rotate(${pullDistance * 4}deg)` }}
+              />
+              <span className="text-[#9298A3]">Pull down to reload</span>
+            </>
+          )}
+        </div>
+      </div>
+
       {/* What's on your mind? entry trigger */}
       <div className="px-4 py-3 border-b border-[#20242C]/60">
         <button
@@ -59,7 +266,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         </button>
       </div>
 
-      {/* Feed Filter Pills */}
+      {/* Feed Filter Pills & Reload Button */}
       <div className="px-4 py-3 flex items-center gap-2 border-b border-[#20242C]/40 overflow-x-auto no-scrollbar">
         <button
           onClick={() => setActiveFilter('for_you')}
@@ -90,6 +297,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           }`}
         >
           Recent
+        </button>
+
+        {/* Quick Reload Feed Button */}
+        <button
+          onClick={triggerManualReload}
+          disabled={isRefreshing || isRefreshingSupabase}
+          title="Reload feed from Supabase"
+          className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-[#8A92A6] hover:text-white bg-[#101010] hover:bg-[#161B26] border border-[#202738] transition-all cursor-pointer shrink-0"
+        >
+          <RefreshCw size={12} className={isRefreshing || isRefreshingSupabase ? "animate-spin text-[#3B82FF]" : "text-[#8A92A6]"} />
+          <span className="hidden sm:inline">Reload</span>
         </button>
       </div>
 
