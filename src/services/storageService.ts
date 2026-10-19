@@ -1,10 +1,11 @@
-import { Author, Challenge, Community, NotificationItem, Post, Squad, ToDoItem } from '../types';
+import { Author, Challenge, Community, CommunityPost, NotificationItem, Post, Squad, ToDoItem } from '../types';
 
 const KEYS = {
   USER: 'daily_app_current_user',
   ONBOARDING_DONE: 'daily_app_onboarding_done',
   AUTH_SESSION: 'daily_app_auth_session',
   POSTS: 'daily_app_posts',
+  COMMUNITY_POSTS: 'daily_app_community_posts',
   CHALLENGES: 'daily_app_challenges',
   COMMUNITIES: 'daily_app_communities',
   TODOS: 'daily_app_todos',
@@ -80,6 +81,15 @@ export const StorageService = {
     const updated = [post, ...current];
     this.savePosts(updated);
     return updated;
+  },
+
+  // Community Discussions & Posts
+  getCommunityPosts(): CommunityPost[] | null {
+    return safeParse<CommunityPost[] | null>(KEYS.COMMUNITY_POSTS, null);
+  },
+
+  saveCommunityPosts(posts: CommunityPost[]): void {
+    safeSet(KEYS.COMMUNITY_POSTS, posts);
   },
 
   // Challenges

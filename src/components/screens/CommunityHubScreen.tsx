@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Author, Community, CommunityPost, Post } from '../../types';
 import { CommunityModeratorModal } from '../modals/CommunityModeratorModal';
+import { getSafeUUID } from '../../lib/supabase';
 
 interface CommunityHubScreenProps {
   community: Community;
@@ -32,6 +33,10 @@ interface CommunityHubScreenProps {
   onApproveJoinRequest?: (communityId: string, requestId: string, applicant: Author) => void;
   onDeclineJoinRequest?: (communityId: string, requestId: string) => void;
   onRequestJoin?: (communityId: string) => void;
+  communityPosts?: CommunityPost[];
+  onCreateDiscussion?: (post: Partial<CommunityPost>) => void;
+  onVoteDiscussion?: (postId: string, direction: 'up' | 'down') => void;
+  onOpenComments?: (post: Post) => void;
   onOpenShare?: (post: Post) => void;
 }
 
@@ -46,8 +51,15 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
   onDeclineJoinRequest,
   onRequestJoin,
   onOpenShare,
+  communityPosts,
+  onCreateDiscussion,
+  onVoteDiscussion,
+  onOpenComments,
 }) => {
   const [activeCategory, setActiveCategory] = useState<'All' | 'Discussion' | 'Question' | 'Advice' | 'Story' | 'Milestone'>('All');
+  const [composerCategory, setComposerCategory] = useState<'Discussion' | 'Question' | 'Advice' | 'Story' | 'Milestone'>('Discussion');
+  const [isComposerExpanded, setIsComposerExpanded] = useState(false);
+  const [newPostTitle, setNewPostTitle] = useState('');
   const [activeSort, setActiveSort] = useState<'Hot' | 'New' | 'Top'>('Hot');
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchInput, setShowSearchInput] = useState(false);
@@ -77,15 +89,14 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
         'Celebrate shipping milestones and uphold cohort confidentiality.',
       ];
 
-  // Initial seed discussion posts for this community
-  const [posts, setPosts] = useState<CommunityPost[]>([
+  const defaultPosts: CommunityPost[] = [
     {
-      id: 'cp_1',
+      id: `cp_welcome_${community.id}`,
       communityId: community.id,
       author: {
-        name: 'Rahul Pratik',
-        username: 'rahul.pratik',
-        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+        name: community.creator?.name || 'Community Founder',
+        username: community.creator?.username || 'founder',
+        avatar: community.creator?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
         isMod: true,
       },
       title: `📌 Welcome to ${community.name}! Discussion & Accountability Hub`,
@@ -97,29 +108,31 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
       timestamp: '1d ago',
       commentsCount: 0,
       isPinned: true,
-    },
-    {
-      id: 'cp_2',
-      communityId: community.id,
-      author: {
-        name: 'Aarav Sharma',
-        username: 'aarav.codes',
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-        isMod: false,
-      },
-      title: 'Architecting fast state synchronization in mobile WebApps',
-      content: 'When synchronizing offline check-ins with server queues, optimistic state updates give 10x better perceived responsiveness. What patterns are you using for rollback handling?',
-      category: 'Advice',
-      badges: [],
-      upvotes: 18,
-      userVote: null,
-      timestamp: '4h ago',
-      commentsCount: 5,
     }
-  ]);
+  ];
+
+  // Merge parent communityPosts with defaults
+  const [localPosts, setLocalPosts] = useState<CommunityPost[]>([]);
+
+  // Combined posts list for this specific community
+  const posts: CommunityPost[] = React.useMemo(() => {
+    const parentList = communityPosts && communityPosts.length > 0 ? communityPosts : [];
+    const merged = [...localPosts, ...parentList];
+    const forThisComm = merged.filter(p => !p.communityId || p.communityId === community.id);
+    if (forThisComm.length === 0) {
+      return defaultPosts;
+    }
+    const seen = new Set<string>();
+    return forThisComm.filter(p => {
+      if (seen.has(p.id)) return false;
+      seen.add(p.id);
+      return true;
+    });
+  }, [communityPosts, localPosts, community.id]);
 
   const handleVote = (postId: string, direction: 'up' | 'down') => {
-    setPosts(prev => prev.map(p => {
+    onVoteDiscussion?.(postId, direction);
+    setLocalPosts(prev => prev.map(p => {
       if (p.id === postId) {
         let delta = 0;
         let newVote: 'up' | 'down' | null = direction;
@@ -145,26 +158,32 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
     e.preventDefault();
     if (!newPostText.trim()) return;
 
+    const chosenCat = composerCategory || (activeCategory === 'All' ? 'Discussion' : activeCategory);
+    const resolvedTitle = newPostTitle.trim() || newPostText.trim().slice(0, 60);
     const newPost: CommunityPost = {
-      id: `cp_${Date.now()}`,
+      id: getSafeUUID(),
       communityId: community.id,
+      communityName: community.name,
       author: {
         name: currentUser.name,
         username: currentUser.username,
         avatar: currentUser.avatar,
-        isMod: false,
+        isMod: isModerator,
       },
-      title: newPostText.trim().slice(0, 60),
+      title: resolvedTitle,
       content: newPostText.trim(),
-      category: activeCategory === 'All' ? 'Discussion' : activeCategory,
+      category: chosenCat,
       upvotes: 1,
       userVote: 'up',
       timestamp: 'Just now',
       commentsCount: 0,
     };
 
-    setPosts([newPost, ...posts]);
+    setLocalPosts(prev => [newPost, ...prev]);
+    onCreateDiscussion?.(newPost);
     setNewPostText('');
+    setNewPostTitle('');
+    setIsComposerExpanded(false);
   };
 
   const categories: ('All' | 'Discussion' | 'Question' | 'Advice' | 'Story' | 'Milestone')[] = [
@@ -383,28 +402,64 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
       )}
 
       {/* Start a discussion composer box */}
-      <form onSubmit={handleCreateDiscussion} className="my-3 p-3 rounded-2xl bg-[#080B10] border border-[#20242C] flex items-center gap-3">
-        <img
-          src={currentUser.avatar}
-          alt={currentUser.name}
-          className="w-9 h-9 rounded-full object-cover border border-[#20242C] shrink-0"
-          referrerPolicy="no-referrer"
-        />
-        <input
-          type="text"
-          value={newPostText}
-          onChange={(e) => setNewPostText(e.target.value)}
-          placeholder={`Start a discussion or ask a question in ${community.name}...`}
-          className="flex-1 bg-transparent text-xs text-white placeholder-[#9298A3] focus:outline-none"
-        />
-        <button
-          type="submit"
-          disabled={!newPostText.trim()}
-          className="w-9 h-9 rounded-full bg-[#2166FF] hover:bg-[#3B82FF] disabled:bg-[#101010] text-white disabled:text-[#9298A3]/40 flex items-center justify-center shadow-md shadow-[#2166FF]/20 transition-all cursor-pointer shrink-0"
-          aria-label="Post discussion"
-        >
-          <Plus size={18} />
-        </button>
+      <form onSubmit={handleCreateDiscussion} className="my-3 p-3 rounded-2xl bg-[#080B10] border border-[#20242C] space-y-2.5">
+        <div className="flex items-center gap-3">
+          <img
+            src={currentUser.avatar}
+            alt={currentUser.name}
+            className="w-9 h-9 rounded-full object-cover border border-[#20242C] shrink-0"
+            referrerPolicy="no-referrer"
+          />
+          <div className="flex-1 min-w-0">
+            {isComposerExpanded && (
+              <input
+                type="text"
+                value={newPostTitle}
+                onChange={(e) => setNewPostTitle(e.target.value)}
+                placeholder="Title (optional)..."
+                className="w-full bg-transparent text-xs font-semibold text-white placeholder-[#8A92A6] focus:outline-none mb-1.5 pb-1 border-b border-[#20242C]/50"
+              />
+            )}
+            <input
+              type="text"
+              value={newPostText}
+              onFocus={() => setIsComposerExpanded(true)}
+              onChange={(e) => setNewPostText(e.target.value)}
+              placeholder={`Post a ${composerCategory.toLowerCase()} in ${community.name}...`}
+              className="w-full bg-transparent text-xs text-white placeholder-[#9298A3] focus:outline-none"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={!newPostText.trim()}
+            className="w-9 h-9 rounded-full bg-[#2166FF] hover:bg-[#3B82FF] disabled:bg-[#101010] text-white disabled:text-[#9298A3]/40 flex items-center justify-center shadow-md shadow-[#2166FF]/20 transition-all cursor-pointer shrink-0"
+            aria-label="Post discussion"
+          >
+            <Plus size={18} />
+          </button>
+        </div>
+
+        {/* Category Picker Chips */}
+        <div className="flex items-center gap-1.5 pt-1 border-t border-[#20242C]/40 overflow-x-auto no-scrollbar">
+          <span className="text-[10px] text-[#8A92A6] uppercase tracking-wider font-semibold shrink-0 mr-1">Type:</span>
+          {(['Discussion', 'Question', 'Advice', 'Story', 'Milestone'] as const).map((cat) => (
+            <button
+              key={cat}
+              type="button"
+              onClick={() => {
+                setComposerCategory(cat);
+                setIsComposerExpanded(true);
+              }}
+              className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all cursor-pointer shrink-0 border ${
+                composerCategory === cat
+                  ? 'bg-[#2166FF] text-white border-[#2166FF] shadow-xs'
+                  : 'bg-[#121620] text-[#8A92A6] border-[#202738] hover:text-white'
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
       </form>
 
       {/* Filter Chips & Sorting Pills */}
@@ -537,7 +592,7 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
                   </div>
 
                   <button
-                    onClick={() => setPosts(prev => prev.filter(p => p.id !== post.id))}
+                    onClick={() => setLocalPosts(prev => prev.filter(p => p.id !== post.id))}
                     className="text-[#9298A3] hover:text-red-400 p-1 cursor-pointer transition-colors"
                     aria-label="Delete post"
                     title="Remove discussion post"
@@ -559,7 +614,27 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
                 {/* Bottom Action Buttons */}
                 <div className="flex items-center gap-2 pt-1 border-t border-[#20242C]/40 text-xs text-[#9298A3]">
                   <button
-                    onClick={() => alert('Opening comments for: ' + post.title)}
+                    onClick={() => {
+                      if (onOpenComments) {
+                        onOpenComments({
+                          id: post.id,
+                          author: {
+                            id: post.author.username,
+                            name: post.author.name,
+                            username: post.author.username,
+                            avatar: post.author.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+                          },
+                          timestamp: post.timestamp,
+                          purpose: 'Insight',
+                          content: `${post.title ? post.title + '\n\n' : ''}${post.content}`,
+                          likesCount: post.upvotes || 0,
+                          commentsCount: post.commentsCount || 0,
+                          comments: [],
+                          communityId: community.id,
+                          communityName: community.name,
+                        });
+                      }
+                    }}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#101010] hover:bg-[#1a1f29] border border-[#20242C] hover:text-white transition-colors cursor-pointer"
                   >
                     <MessageSquare size={13} />
@@ -588,7 +663,6 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
                         });
                       } else {
                         navigator.clipboard?.writeText(window.location.href);
-                        alert('Discussion link copied!');
                       }
                     }}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#101010] hover:bg-[#1a1f29] border border-[#20242C] hover:text-white transition-colors cursor-pointer"
@@ -598,7 +672,7 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
                   </button>
 
                   <button
-                    onClick={() => alert('Thank you for reporting this post.')}
+                    onClick={() => {}}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#101010] hover:bg-[#1a1f29] border border-[#20242C] hover:text-white transition-colors cursor-pointer"
                   >
                     <Flag size={13} />

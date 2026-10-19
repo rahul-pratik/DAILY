@@ -221,7 +221,7 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
       }
     ];
 
-    selectedInviteUsernames.forEach((uname) => {
+    selectedInviteUsernames.slice(0, Math.max(0, newSquadRequiredSize - 1)).forEach((uname) => {
       const foundUser = allUsers.find(u => u.username === uname);
       if (foundUser) {
         initialMembers.push({
@@ -349,8 +349,23 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
           </div>
 
           {squads.map((squad) => {
-            const squadCh = challenges.find(c => c.id === squad.challengeId) || challenges[0];
-            const members = squad.members;
+            const squadCh = challenges.find((challenge) => challenge.id === squad.challengeId);
+            const rawMembers = squad.members || [];
+            const hasCreatorInRoster = rawMembers.some(m =>
+              (squad.creator?.username && m.username?.toLowerCase() === squad.creator.username.toLowerCase()) ||
+              (squad.creator?.name && m.name === squad.creator.name && m.role === 'creator')
+            );
+            const members = hasCreatorInRoster ? rawMembers : [
+              {
+                id: `u_${squad.creator?.username || 'leader'}`,
+                name: squad.creator?.name || 'Squad Lead',
+                username: squad.creator?.username || 'leader',
+                avatar: squad.creator?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+                dayReached: 1,
+                role: 'creator' as const,
+              },
+              ...rawMembers
+            ];
             const checkedInList = squadCheckedInMap[squad.id] || members.slice(0, Math.max(1, members.length - 1)).map(m => m.username);
             const checkedInCount = members.filter(m => checkedInList.includes(m.username)).length;
             const totalMembers = members.length;
@@ -548,9 +563,25 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
 
           {squads.map((squad) => {
             const squadCh = challenges.find(c => c.id === squad.challengeId) || challenges[0];
-            const requiredSize = squad.requiredSize || 5;
-            const currentSize = squad.members.length;
-            const isEligible = currentSize === requiredSize;
+            const requiredSize = squad.requiredSize || 2;
+            const rawMembers = squad.members || [];
+            const hasCreatorInRoster = rawMembers.some(m =>
+              (squad.creator?.username && m.username?.toLowerCase() === squad.creator.username.toLowerCase()) ||
+              (squad.creator?.name && m.name === squad.creator.name && m.role === 'creator')
+            );
+            const members = hasCreatorInRoster ? rawMembers : [
+              {
+                id: `u_${squad.creator?.username || 'leader'}`,
+                name: squad.creator?.name || 'Squad Lead',
+                username: squad.creator?.username || 'leader',
+                avatar: squad.creator?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+                dayReached: 1,
+                role: 'creator' as const,
+              },
+              ...rawMembers
+            ];
+            const currentSize = members.length;
+            const isEligible = currentSize >= requiredSize;
             const entrySession = squad.entrySession;
             const isEntered = entrySession?.status === 'entered' || squadCh?.joined;
             const acceptedCount = entrySession?.acceptedUsernames.length || 0;
@@ -735,12 +766,12 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                 {/* CHALLENGE MEMBERS ROSTER (NO recorded team proofs or posts) */}
                 <div>
                   <div className="flex items-center justify-between text-[11px] font-semibold text-[#8A92A6] uppercase tracking-wider mb-2">
-                    <span>Challenge Members ({squad.members.length})</span>
+                    <span>Challenge Members ({members.length})</span>
                     <span className="text-[#3B82FF] font-mono">Limit: {requiredSize}</span>
                   </div>
 
                   <div className="space-y-1.5">
-                    {squad.members.map((member) => {
+                    {members.map((member) => {
                       const isFailed = failedList.includes(member.username);
                       return (
                         <div

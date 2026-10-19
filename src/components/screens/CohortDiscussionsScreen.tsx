@@ -21,6 +21,7 @@ import {
   Link as LinkIcon
 } from 'lucide-react';
 import { Author, Challenge, CohortProof } from '../../types';
+import { getSafeUUID } from '../../lib/supabase';
 
 interface CohortDiscussionsScreenProps {
   challenge: Challenge;
@@ -240,7 +241,7 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
     if (!proofNote.trim() && !selectedProofPhoto) return;
 
     const newProof: CohortProof = {
-      id: `proof_${Date.now()}`,
+      id: getSafeUUID(),
       challengeId: selectedCohort.id,
       author: currentUser,
       dayNumber: (selectedCohort.current || 0) + 1,

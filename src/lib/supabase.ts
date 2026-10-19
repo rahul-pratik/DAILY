@@ -40,6 +40,28 @@ export const getSafeUUID = (): string => {
   });
 };
 
+export const toDeterministicUUID = (input?: string | null): string => {
+  if (!input) return getSafeUUID();
+  if (isValidUUID(input)) return input;
+
+  // Simple stable 128-bit hash from string
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57, h3 = 0x12345678, h4 = 0x87654321;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+    h3 = Math.imul(h3 ^ ch, 974246919);
+    h4 = Math.imul(h4 ^ ch, 381204193);
+  }
+  const toHex = (n: number, len = 8) => (n >>> 0).toString(16).padStart(len, '0').slice(-len);
+  const part1 = toHex(h1, 8);
+  const part2 = toHex(h2 & 0xffff, 4);
+  const part3 = '4' + toHex((h2 >>> 16) & 0x0fff, 3);
+  const part4 = ((8 | ((h3 & 0x3) as number)).toString(16)) + toHex((h3 >>> 4) & 0x0fff, 3);
+  const part5 = toHex(h4, 8) + toHex(h3 ^ h1, 4);
+  return `${part1}-${part2}-${part3}-${part4}-${part5}`.toLowerCase();
+};
+
 export const syncProfileToSupabase = async (profile: {
   id: string;
   name: string;
