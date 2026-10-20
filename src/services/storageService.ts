@@ -1,4 +1,4 @@
-import { Author, Challenge, Community, CommunityPost, NotificationItem, Post, Squad, ToDoItem } from '../types';
+import { Author, Challenge, Comment, Community, CommunityPost, NotificationItem, Post, Squad, ToDoItem } from '../types';
 
 const KEYS = {
   USER: 'daily_app_current_user',
@@ -12,6 +12,7 @@ const KEYS = {
   NOTIFICATIONS: 'daily_app_notifications',
   CREATORS: 'daily_app_creators',
   SQUADS: 'daily_app_squads',
+  COMMENTS_REGISTRY: 'daily_app_comments_registry',
 };
 
 // Safe JSON parser
@@ -168,6 +169,58 @@ export const StorageService = {
     const key = userId ? `daily_app_user_bookmarks_${userId}` : 'daily_app_user_bookmarks';
     safeSet(key, bookmarkedPostIds);
     safeSet('daily_app_user_bookmarks', bookmarkedPostIds);
+  },
+
+  // Cross-account Comments Registry (persists comments across accounts and sessions)
+  getCommentsRegistry(): Record<string, Comment[]> {
+    return safeParse<Record<string, Comment[]>>(KEYS.COMMENTS_REGISTRY, {});
+  },
+
+  getCommentsForPost(postId: string): Comment[] {
+    const registry = this.getCommentsRegistry();
+    return registry[postId] || [];
+  },
+
+  addCommentToPost(postId: string, comment: Comment): Comment[] {
+    const registry = this.getCommentsRegistry();
+    const current = registry[postId] || [];
+    // Avoid duplicate comment IDs
+    const exists = current.some((c) => c.id === comment.id);
+    const updated = exists ? current.map((c) => (c.id === comment.id ? comment : c)) : [comment, ...current];
+    registry[postId] = updated;
+    safeSet(KEYS.COMMENTS_REGISTRY, registry);
+    return updated;
+  },
+
+  removeCommentFromPost(postId: string, commentId: string): void {
+    const registry = this.getCommentsRegistry();
+    if (registry[postId]) {
+      registry[postId] = registry[postId].filter((c) => c.id !== commentId);
+      safeSet(KEYS.COMMENTS_REGISTRY, registry);
+    }
+  },
+
+  updateCommentAuthor(oldUsername: string, updatedAuthor: Partial<Author>): void {
+    const registry = this.getCommentsRegistry();
+    let changed = false;
+    Object.keys(registry).forEach((pId) => {
+      registry[pId] = registry[pId].map((c) => {
+        if (c.author?.username?.toLowerCase() === oldUsername.toLowerCase()) {
+          changed = true;
+          return {
+            ...c,
+            author: {
+              ...c.author,
+              ...updatedAuthor,
+            },
+          };
+        }
+        return c;
+      });
+    });
+    if (changed) {
+      safeSet(KEYS.COMMENTS_REGISTRY, registry);
+    }
   },
 
   // Reset entire application data

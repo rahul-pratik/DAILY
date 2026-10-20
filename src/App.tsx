@@ -14,7 +14,7 @@ import {
   INITIAL_COMMUNITY_WRITINGS,
   INITIAL_SQUADS
 } from './data/initialData';
-import { Author, Challenge, CohortProof, Community, CommunityPost, JoinRequest, NotificationItem, Post, PurposeLabel, ScreenType, Squad, ToDoItem } from './types';
+import { Author, Challenge, CohortProof, Comment, Community, CommunityPost, JoinRequest, NotificationItem, Post, PurposeLabel, ScreenType, Squad, ToDoItem } from './types';
 import { TopHeader } from './components/TopHeader';
 import { Navigation } from './components/Navigation';
 import { HomeScreen } from './components/screens/HomeScreen';
@@ -69,7 +69,20 @@ export default function App() {
   const [accountabilityHubUser, setAccountabilityHubUser] = useState<Author>(() => StorageService.getCurrentUser() ?? defaultGuestUser);
   const [posts, setPosts] = useState<Post[]>(() => {
     const s = StorageService.getPosts();
-    return s && s.length > 0 ? s : INITIAL_POSTS;
+    const raw = s && s.length > 0 ? s : INITIAL_POSTS;
+    return raw.map((p) => {
+      const extra = StorageService.getCommentsForPost(p.id);
+      if (!extra || extra.length === 0) return p;
+      const existingIds = new Set((p.comments || []).map((c) => c.id));
+      const newComments = extra.filter((c) => !existingIds.has(c.id));
+      if (newComments.length === 0) return p;
+      const combined = [...(p.comments || []), ...newComments];
+      return {
+        ...p,
+        comments: combined,
+        commentsCount: Math.max(p.commentsCount, combined.length),
+      };
+    });
   });
   const [challenges, setChallenges] = useState<Challenge[]>(() => {
     const s = StorageService.getChallenges();
@@ -335,11 +348,20 @@ export default function App() {
 
           const localExistingPost = (StorageService.getPosts() || []).find((lp) => lp.id === p.id || toDeterministicUUID(lp.id) === p.id);
           const remoteComments = commentsByPost.get(p.id) || (toDeterministicUUID(p.id) ? commentsByPost.get(toDeterministicUUID(p.id)) : undefined) || [];
-          const remoteCommentIds = new Set(remoteComments.map((rc: any) => rc.id));
-          const localOnlyComments = (localExistingPost?.comments || []).filter(
-            (lc) => !remoteCommentIds.has(lc.id)
+          const registryComments = StorageService.getCommentsForPost(p.id).concat(
+            toDeterministicUUID(p.id) ? StorageService.getCommentsForPost(toDeterministicUUID(p.id)) : []
           );
-          const postComments = [...localOnlyComments, ...remoteComments];
+
+          // Seed comments registry with remote comments so they survive logout/switching
+          remoteComments.forEach((rc: Comment) => {
+            StorageService.addCommentToPost(p.id, rc);
+          });
+
+          const commentMap = new Map<string, Comment>();
+          (localExistingPost?.comments || []).forEach((lc) => commentMap.set(lc.id, lc));
+          registryComments.forEach((rc) => commentMap.set(rc.id, rc));
+          remoteComments.forEach((rc: Comment) => commentMap.set(rc.id, rc));
+          const postComments = Array.from(commentMap.values());
 
           return {
             id: p.id,
@@ -367,7 +389,18 @@ export default function App() {
 
         const localPosts = StorageService.getPosts() || [];
         const remoteIds = new Set(mappedRemotePosts.map((p) => p.id));
-        const nonSyncedLocal = localPosts.filter((p) => !remoteIds.has(p.id) && !remoteIds.has(toDeterministicUUID(p.id)));
+        const nonSyncedLocal = localPosts
+          .filter((p) => !remoteIds.has(p.id) && !remoteIds.has(toDeterministicUUID(p.id)))
+          .map((p) => {
+            const reg = StorageService.getCommentsForPost(p.id);
+            const existing = new Set((p.comments || []).map((c) => c.id));
+            const merged = [...(p.comments || []), ...reg.filter((c) => !existing.has(c.id))];
+            return {
+              ...p,
+              comments: merged,
+              commentsCount: Math.max(p.commentsCount, merged.length),
+            };
+          });
         const finalMergedPosts = [...mappedRemotePosts, ...nonSyncedLocal];
 
         setPosts(finalMergedPosts);
@@ -1264,6 +1297,13 @@ export default function App() {
       likes: 0,
     };
 
+    // Save immediately to persistent comments registry
+    StorageService.addCommentToPost(postId, newComment);
+    const safeUuidPost = toDeterministicUUID(postId);
+    if (safeUuidPost && safeUuidPost !== postId) {
+      StorageService.addCommentToPost(safeUuidPost, newComment);
+    }
+
     const isMatch = (id?: string) => id === postId || toDeterministicUUID(id || '') === postId || id === toDeterministicUUID(postId);
 
     const sourcePost = posts.find((post) => isMatch(post.id)) ||
@@ -1441,6 +1481,7 @@ export default function App() {
     purpose?: PurposeLabel;
     mediaUrls?: string[];
     audience?: string;
+    isDailyProof?: boolean;
   }) => {
     const postId = getSafeUUID();
 
@@ -1468,6 +1509,7 @@ export default function App() {
       purpose: data.purpose,
       content: data.content,
       mediaUrls: processedMedia,
+      isDailyProof: data.isDailyProof,
       likesCount: 0,
       commentsCount: 0,
       isLiked: false,
@@ -1680,10 +1722,11 @@ export default function App() {
       id: discId,
       author: currentUser,
       timestamp: 'Just now',
-      purpose: mappedPurpose,
+      purpose: post.isDailyProof ? 'Progress' : mappedPurpose,
       content: fullContent,
       communityId: targetCommId,
       communityName: targetComm?.name,
+      isDailyProof: post.isDailyProof,
       likesCount: 1,
       commentsCount: 0,
       isLiked: true,
@@ -2565,14 +2608,76 @@ export default function App() {
     StorageService.saveCurrentUser(updatedUser);
 
     setPosts((prev) => {
-      const updatedPosts = prev.map((p) =>
-        p.author.username === currentUser.username || p.author.id === currentUser.id
-          ? { ...p, author: { ...p.author, ...updatedUser } }
-          : p
-      );
+      const updatedPosts = prev.map((p) => {
+        const isPostAuthor = p.author.username === currentUser.username || p.author.id === currentUser.id;
+        const updatedAuthor = isPostAuthor ? { ...p.author, ...updatedUser } : p.author;
+        const updatedComments = (p.comments || []).map((c) =>
+          c.author.username === currentUser.username || c.author.id === currentUser.id
+            ? { ...c, author: { ...c.author, ...updatedUser } }
+            : c
+        );
+        return {
+          ...p,
+          author: updatedAuthor,
+          comments: updatedComments,
+        };
+      });
       StorageService.savePosts(updatedPosts);
       return updatedPosts;
     });
+
+    // Update community posts authored by user
+    setCommunityPosts((prev) => {
+      const updated = prev.map((cp) =>
+        cp.author.username === currentUser.username
+          ? {
+              ...cp,
+              author: {
+                ...cp.author,
+                name: updatedUser.name,
+                username: updatedUser.username,
+                avatar: updatedUser.avatar,
+              },
+            }
+          : cp
+      );
+      StorageService.saveCommunityPosts(updated);
+      return updated;
+    });
+
+    // Update challenges created by user
+    setChallenges((prev) => {
+      const updated = prev.map((ch) =>
+        ch.creator && (ch.creator.username === currentUser.username || (ch.creator as any)?.id === currentUser.id)
+          ? { ...ch, creator: { ...ch.creator, ...updatedUser } }
+          : ch
+      );
+      StorageService.saveChallenges(updated);
+      return updated;
+    });
+
+    // Update squads where user is creator or member
+    setSquads((prev) => {
+      const updated = prev.map((sq) => {
+        const isCreator = sq.creator && (sq.creator.username === currentUser.username || (sq.creator as any)?.id === currentUser.id);
+        const updatedCreator = isCreator ? { ...sq.creator, ...updatedUser } : sq.creator;
+        const updatedMembers = (sq.members || []).map((m) =>
+          m.username === currentUser.username || m.id === currentUser.id
+            ? { ...m, name: updatedUser.name, username: updatedUser.username, avatar: updatedUser.avatar }
+            : m
+        );
+        return {
+          ...sq,
+          creator: updatedCreator,
+          members: updatedMembers,
+        };
+      });
+      StorageService.saveSquads(updated);
+      return updated;
+    });
+
+    // Update persistent comments registry
+    StorageService.updateCommentAuthor(currentUser.username, updatedUser);
 
     // Also update allCreators so search and user lists immediately reflect new avatar and details
     setAllCreators((prev) => {
@@ -2783,11 +2888,198 @@ export default function App() {
     showToast('To-Do item removed');
   };
 
-  const handleCheckInWithProof = (challengeId: string, note: string, photoUrl?: string) => {
-    handleIncrementChallenge(challengeId);
-    if (note || photoUrl) {
-      showToast(`Proof logged with ${photoUrl ? 'photo' : 'note'}!`);
+  const handleDeletePost = async (postId: string) => {
+    const isMatch = (id?: string) => id === postId || toDeterministicUUID(id || '') === postId || id === toDeterministicUUID(postId);
+
+    setPosts((prev) => {
+      const filtered = prev.filter((p) => !isMatch(p.id));
+      StorageService.savePosts(filtered);
+      return filtered;
+    });
+
+    setCommunityPosts((prev) => {
+      const filtered = prev.filter((cp) => !isMatch(cp.id));
+      StorageService.saveCommunityPosts(filtered);
+      return filtered;
+    });
+
+    setSelectedPostForComments((prev) => (prev && isMatch(prev.id) ? null : prev));
+    setSelectedPostForMenu((prev) => (prev && isMatch(prev.id) ? null : prev));
+    setSelectedPostForShare((prev) => (prev && isMatch(prev.id) ? null : prev));
+
+    showToast('Post deleted');
+
+    try {
+      const activeUserId = await getActiveAuthUserId();
+      if (activeUserId) {
+        const safeId = toDeterministicUUID(postId);
+        await supabase.from('posts').delete().eq('id', safeId);
+      }
+    } catch (e) {
+      console.warn('Supabase post deletion error:', e);
     }
+  };
+
+  const handleDeleteComment = async (postId: string, commentId: string) => {
+    const isMatch = (id?: string) => id === postId || toDeterministicUUID(id || '') === postId || id === toDeterministicUUID(postId);
+
+    setPosts((prev) => {
+      const updated = prev.map((post) => {
+        if (isMatch(post.id)) {
+          const updatedComments = (post.comments || []).filter((c) => c.id !== commentId);
+          return {
+            ...post,
+            comments: updatedComments,
+            commentsCount: Math.max(0, (post.commentsCount || 1) - 1),
+          };
+        }
+        return post;
+      });
+      StorageService.savePosts(updated);
+      return updated;
+    });
+
+    // Also remove from StorageService comments registry
+    StorageService.removeCommentFromPost(postId, commentId);
+    const safePostUuid = toDeterministicUUID(postId);
+    if (safePostUuid && safePostUuid !== postId) {
+      StorageService.removeCommentFromPost(safePostUuid, commentId);
+    }
+
+    setSelectedPostForComments((prev) => {
+      if (!prev || !isMatch(prev.id)) return prev;
+      const updatedComments = (prev.comments || []).filter((c) => c.id !== commentId);
+      return {
+        ...prev,
+        comments: updatedComments,
+        commentsCount: Math.max(0, (prev.commentsCount || 1) - 1),
+      };
+    });
+
+    showToast('Comment deleted');
+
+    try {
+      const activeUserId = await getActiveAuthUserId();
+      if (activeUserId) {
+        await supabase.from('post_comments').delete().eq('id', commentId);
+      }
+    } catch (e) {
+      console.warn('Supabase comment deletion error:', e);
+    }
+  };
+
+  const handleDeleteChallenge = async (challengeId: string) => {
+    setChallenges((prev) => {
+      const filtered = prev.filter((c) => c.id !== challengeId);
+      StorageService.saveChallenges(filtered);
+      return filtered;
+    });
+
+    setToDoList((prev) => prev.filter((t) => t.challengeId !== challengeId));
+
+    if (currentScreen === 'challenge_detail' && activeChallenge?.id === challengeId) {
+      setCurrentScreen('challenges');
+    }
+    if (selectedChallenge?.id === challengeId) {
+      setSelectedChallenge(null);
+    }
+
+    showToast('Challenge deleted');
+
+    try {
+      const activeUserId = await getActiveAuthUserId();
+      if (activeUserId) {
+        const safeId = toDeterministicUUID(challengeId);
+        await supabase.from('challenges').delete().eq('id', safeId);
+      }
+    } catch (e) {
+      console.warn('Supabase challenge delete error:', e);
+    }
+  };
+
+  const handleDeleteSquad = async (squadId: string) => {
+    setSquads((prev) => {
+      const filtered = prev.filter((sq) => sq.id !== squadId);
+      StorageService.saveSquads(filtered);
+      return filtered;
+    });
+
+    showToast('Squad deleted');
+
+    try {
+      const activeUserId = await getActiveAuthUserId();
+      if (activeUserId) {
+        const safeId = toDeterministicUUID(squadId);
+        await supabase.from('squads').delete().eq('id', safeId);
+      }
+    } catch (e) {
+      console.warn('Supabase squad delete error:', e);
+    }
+  };
+
+  const handleCheckInWithProof = (
+    challengeId: string,
+    note: string,
+    photoUrl?: string,
+    addAsDailyProof: boolean = true
+  ) => {
+    handleIncrementChallenge(challengeId);
+    const targetCh = challenges.find((c) => c.id === challengeId);
+    const dayNumber = (targetCh?.current || 0) + 1;
+
+    if (addAsDailyProof) {
+      const proofPostId = getSafeUUID();
+      const contentText = note.trim()
+        ? `${note.trim()}\n\n[Verified Daily Proof • Day ${dayNumber} of ${targetCh?.title || 'Challenge'}]`
+        : `Completed Day ${dayNumber} check-in for ${targetCh?.title || 'Challenge'}! 🎯`;
+
+      const proofPost: Post = {
+        id: proofPostId,
+        author: currentUser,
+        timestamp: 'Just now',
+        purpose: 'Progress',
+        content: contentText,
+        mediaUrls: photoUrl ? [photoUrl] : undefined,
+        imageUrl: photoUrl,
+        mediaType: photoUrl ? 'image' : undefined,
+        likesCount: 0,
+        commentsCount: 0,
+        isLiked: false,
+        isSaved: false,
+        isDailyProof: true,
+        proofDay: dayNumber,
+        challengeTitle: targetCh?.title,
+      };
+
+      setPosts((prev) => {
+        const next = [proofPost, ...prev];
+        StorageService.savePosts(next);
+        return next;
+      });
+
+      // Also sync to Supabase if authenticated
+      getActiveAuthUserId().then(async (safeAuthorId) => {
+        if (safeAuthorId) {
+          try {
+            await syncProfileToSupabase({ ...currentUser, id: safeAuthorId });
+            await supabase.from('posts').insert({
+              id: toDeterministicUUID(proofPostId),
+              author_id: safeAuthorId,
+              content: contentText,
+              purpose: 'Progress',
+              media_urls: photoUrl ? [photoUrl] : [],
+              media_type: photoUrl ? 'image' : 'none',
+              likes_count: 0,
+              comments_count: 0,
+            });
+          } catch (err) {
+            console.warn('Supabase daily proof insert error:', err);
+          }
+        }
+      }).catch(() => {});
+    }
+
+    showToast(`Day ${dayNumber} proof logged${photoUrl ? ' with photo' : ''}!`);
   };
 
   const handleOpenChallengeDetail = (challenge: Challenge) => {
@@ -2927,6 +3219,8 @@ export default function App() {
             onEnterChallengeWithSquad={handleEnterChallengeWithSquad}
             onAcceptSquadEntry={handleAcceptSquadEntry}
             onAcceptAllSquadEntry={handleAcceptAllSquadEntry}
+            onDeleteSquad={handleDeleteSquad}
+            onDeleteChallenge={handleDeleteChallenge}
           />
         );
       case 'create':
@@ -2973,6 +3267,7 @@ export default function App() {
             onSelectCommunity={(comm) => handleOpenCommunityHub(comm)}
             onOpenShare={(post) => setSelectedPostForShare(post)}
             onToggleSave={handleToggleSave}
+            onDeletePost={handleDeletePost}
           />
         );
       case 'accountability_hub':
@@ -3086,6 +3381,7 @@ export default function App() {
             onOpenCohortChat={() => handleOpenCohortDiscussions(targetCh)}
             onToggleJoin={handleToggleJoinChallenge}
             onRestartChallenge={handleRestartChallenge}
+            onDeleteChallenge={handleDeleteChallenge}
             isInTodoList={toDoList.some((t) => t.challengeId === targetCh.id)}
           />
         );
@@ -3342,6 +3638,7 @@ export default function App() {
         currentUser={currentUser}
         onClose={() => setSelectedPostForComments(null)}
         onAddComment={handleAddComment}
+        onDeleteComment={handleDeleteComment}
         onNavigateAuthorProfile={(author) => handleNavigateToUser(author)}
       />
 
@@ -3355,6 +3652,7 @@ export default function App() {
       {isEditProfileOpen && (
         <EditProfileModal
           user={currentUser}
+          existingUsernames={allCreators.map((c) => c.username).concat(posts.map((p) => p.author.username))}
           onClose={() => setIsEditProfileOpen(false)}
           onSave={handleSaveProfile}
         />
@@ -3418,6 +3716,7 @@ export default function App() {
 
       <PostMenuModal
         post={selectedPostForMenu}
+        currentUser={currentUser}
         onClose={() => setSelectedPostForMenu(null)}
         onToggleSave={handleToggleSave}
         onCopyLink={() => {
@@ -3425,6 +3724,7 @@ export default function App() {
           showToast('Link copied to clipboard');
         }}
         onOpenShareToCommunity={(post) => setSelectedPostForShare(post)}
+        onDeletePost={handleDeletePost}
       />
 
       {/* Share to Community & Quick Share Modal */}

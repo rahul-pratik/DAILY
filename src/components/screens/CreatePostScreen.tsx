@@ -10,7 +10,10 @@ import {
   X,
   ChevronDown,
   Crop,
-  Sparkles
+  Sparkles,
+  Camera,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 import { Author, PurposeLabel } from '../../types';
 import { ImageCropModal } from '../modals/ImageCropModal';
@@ -23,6 +26,7 @@ interface CreatePostScreenProps {
     purpose?: PurposeLabel;
     mediaUrls?: string[];
     audience?: string;
+    isDailyProof?: boolean;
   }) => void;
 }
 
@@ -33,10 +37,12 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
 }) => {
   const [content, setContent] = useState('');
   const [selectedPurpose, setSelectedPurpose] = useState<PurposeLabel | undefined>(undefined);
+  const [isDailyProof, setIsDailyProof] = useState(false);
   const [selectedMedia, setSelectedMedia] = useState<string[]>([]);
   const [audience, setAudience] = useState<'Public' | 'Followers'>('Public');
   const [showAudienceMenu, setShowAudienceMenu] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   // Cropper states
   const [isCropModalOpen, setIsCropModalOpen] = useState(false);
@@ -111,15 +117,16 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
     setSelectedMedia((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const isReadyToPost = Boolean(selectedPurpose && (content.trim() || selectedMedia.length > 0));
+  const isReadyToPost = Boolean((selectedPurpose || isDailyProof) && (content.trim() || selectedMedia.length > 0));
 
   const handleSubmit = () => {
     if (!isReadyToPost) return;
     onSubmitPost({
       content: content.trim(),
-      purpose: selectedPurpose,
+      purpose: selectedPurpose || (isDailyProof ? 'Progress' : 'Insight'),
       mediaUrls: selectedMedia.length > 0 ? selectedMedia : undefined,
       audience,
+      isDailyProof,
     });
   };
 
@@ -247,6 +254,42 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
         </div>
       </div>
 
+      {/* Feature 3: Option "Post as Daily Proof" */}
+      <div
+        onClick={() => {
+          const nextVal = !isDailyProof;
+          setIsDailyProof(nextVal);
+          if (nextVal && !selectedPurpose) {
+            setSelectedPurpose('Progress');
+          }
+        }}
+        className={`mb-4 p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
+          isDailyProof
+            ? 'bg-[#2166FF]/15 border-[#2166FF] shadow-sm'
+            : 'bg-[#080B10] hover:bg-[#101010] border-[#20242C]'
+        }`}
+      >
+        <div className="flex items-center gap-2.5">
+          <div className="text-[#2166FF]">
+            {isDailyProof ? <CheckSquare size={17} /> : <Square size={17} className="text-[#8A92A6]" />}
+          </div>
+          <div>
+            <p className="text-xs font-semibold text-white flex items-center gap-1.5">
+              <Sparkles size={13} className="text-[#3B82FF]" />
+              <span>Post as Daily Proof</span>
+            </p>
+            <p className="text-[10px] text-[#8A92A6]">
+              Tags this post as verified daily proof of work and builds your consistency streak
+            </p>
+          </div>
+        </div>
+        <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full ${
+          isDailyProof ? 'bg-[#2166FF] text-white' : 'bg-[#121620] text-[#8A92A6]'
+        }`}>
+          {isDailyProof ? 'Active' : 'Off'}
+        </span>
+      </div>
+
       {/* Media Attachments Preview if any */}
       {selectedMedia.length > 0 && (
         <div className="mb-4">
@@ -342,15 +385,35 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
         className="hidden"
       />
 
+      {/* Hidden camera capture input */}
+      <input
+        type="file"
+        ref={cameraInputRef}
+        onChange={handleFileUpload}
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+      />
+
       {/* Bottom Attachment Action Icons (Photo only) */}
-      <div className="pt-2 flex items-center gap-4 text-[#9298A3] border-t border-[#20242C]/40">
+      <div className="pt-2 flex items-center gap-2 text-[#9298A3] border-t border-[#20242C]/40">
+        <button
+          type="button"
+          onClick={() => cameraInputRef.current?.click()}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:text-white hover:bg-[#101010] bg-[#121622] text-[#3B82FF] border border-[#2166FF]/30 transition-colors cursor-pointer text-xs font-medium"
+          aria-label="Take progress photo with camera"
+        >
+          <Camera size={16} />
+          <span>Camera</span>
+        </button>
+
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-full hover:text-white hover:bg-[#101010] transition-colors cursor-pointer text-xs"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:text-white hover:bg-[#101010] transition-colors cursor-pointer text-xs"
           aria-label="Upload image"
         >
-          <ImageIcon size={18} className="text-[#3B82FF]" />
+          <ImageIcon size={16} className="text-[#3B82FF]" />
           <span>Upload Image</span>
         </button>
       </div>

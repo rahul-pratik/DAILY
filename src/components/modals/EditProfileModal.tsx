@@ -8,13 +8,18 @@ import {
   Crop, 
   Upload, 
   Sparkles, 
-  Image as ImageIcon 
+  Image as ImageIcon,
+  AlertCircle,
+  CheckCircle2,
+  Loader2
 } from 'lucide-react';
 import { Author } from '../../types';
 import { ImageCropModal } from './ImageCropModal';
+import { supabase } from '../../lib/supabase';
 
 interface EditProfileModalProps {
   user: Author;
+  existingUsernames?: string[];
   onClose: () => void;
   onSave: (updated: { 
     name: string; 
@@ -28,6 +33,7 @@ interface EditProfileModalProps {
 
 export const EditProfileModal: React.FC<EditProfileModalProps> = ({
   user,
+  existingUsernames = [],
   onClose,
   onSave,
 }) => {
@@ -41,6 +47,12 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
   const [hubPrivacy, setHubPrivacy] = useState<'public' | 'private'>(
     user.accountabilityHubPrivacy || 'public'
   );
+
+  // Username validation & auto-suggestions state
+  const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'available' | 'taken' | 'invalid'>('idle');
+  const [usernameError, setUsernameError] = useState<string | null>(null);
+  const [usernameSuggestions, setUsernameSuggestions] = useState<string[]>([]);
+  const checkTimeoutRef = useRef<any>(null);
 
   // Cropper states
   const [cropperOpen, setCropperOpen] = useState(false);
@@ -76,6 +88,87 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
     setCropperOpen(true);
   };
 
+  const generateSuggestions = (base: string): string[] => {
+    const cleanBase = base.toLowerCase().replace(/[^a-z0-9._]/g, '');
+    const pool = [
+      `${cleanBase}_daily`,
+      `${cleanBase}_${Math.floor(10 + Math.random() * 89)}`,
+      `${cleanBase}.build`,
+      `${cleanBase}_hq`,
+      `the_${cleanBase}`,
+    ];
+    const takenSet = new Set(existingUsernames.map((u) => u.toLowerCase()));
+    return pool.filter((s) => !takenSet.has(s.toLowerCase())).slice(0, 3);
+  };
+
+  const handleUsernameChange = (val: string) => {
+    const rawVal = val.replace(/^@/, '');
+    const cleanVal = rawVal.toLowerCase().replace(/[^a-z0-9._]/g, '');
+    setUsername(cleanVal);
+
+    if (checkTimeoutRef.current) clearTimeout(checkTimeoutRef.current);
+
+    if (cleanVal === user.username.toLowerCase()) {
+      setUsernameStatus('available');
+      setUsernameError(null);
+      setUsernameSuggestions([]);
+      return;
+    }
+
+    if (cleanVal.length < 3) {
+      setUsernameStatus('invalid');
+      setUsernameError('Handle must be at least 3 characters');
+      setUsernameSuggestions([]);
+      return;
+    }
+
+    setUsernameStatus('checking');
+    setUsernameError(null);
+
+    checkTimeoutRef.current = setTimeout(async () => {
+      // 1. Check local existing usernames
+      const isTakenLocally = existingUsernames.some(
+        (u) => u.toLowerCase() === cleanVal && u.toLowerCase() !== user.username.toLowerCase()
+      );
+
+      if (isTakenLocally) {
+        setUsernameStatus('taken');
+        setUsernameError(`@${cleanVal} is already taken.`);
+        setUsernameSuggestions(generateSuggestions(cleanVal));
+        return;
+      }
+
+      // 2. Query live Supabase profiles table
+      try {
+        const { data: matchedProfile } = await supabase
+          .from('profiles')
+          .select('id, username')
+          .eq('username', cleanVal)
+          .maybeSingle();
+
+        if (matchedProfile && matchedProfile.id !== user.id) {
+          setUsernameStatus('taken');
+          setUsernameError(`@${cleanVal} is already taken by another user.`);
+          setUsernameSuggestions(generateSuggestions(cleanVal));
+          return;
+        }
+      } catch (err) {
+        // Fallback to local check
+      }
+
+      setUsernameStatus('available');
+      setUsernameError(null);
+      setUsernameSuggestions([]);
+    }, 250);
+  };
+
+  const handleApplySuggestion = (sug: string) => {
+    setUsername(sug);
+    setUsernameStatus('available');
+    setUsernameError(null);
+    setUsernameSuggestions([]);
+  };
+
   const handleCropComplete = (croppedDataUrl: string) => {
     if (cropperTarget === 'avatar') {
       setAvatar(croppedDataUrl);
@@ -87,10 +180,14 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (usernameStatus === 'taken' || usernameStatus === 'invalid' || usernameStatus === 'checking') {
+      return;
+    }
+    const finalCleanUsername = username.trim().toLowerCase().replace(/^@/, '');
     onSave({ 
-      name, 
-      username, 
-      bio, 
+      name: name.trim(), 
+      username: finalCleanUsername, 
+      bio: bio.trim(), 
       avatar, 
       bannerUrl, 
       accountabilityHubPrivacy: hubPrivacy 
@@ -267,19 +364,71 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
 
             {/* Username */}
             <div>
-              <label className="block text-xs font-medium text-[#9298A3] mb-1">
-                Username Handle
-              </label>
-              <div className="flex items-center bg-[#101010] border border-[#20242C] rounded-xl px-3.5 py-2">
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-medium text-[#9298A3]">
+                  Username Handle
+                </label>
+                {usernameStatus === 'checking' && (
+                  <span className="text-[10px] text-[#3B82FF] flex items-center gap-1 font-mono">
+                    <Loader2 size={10} className="animate-spin" /> Checking...
+                  </span>
+                )}
+                {usernameStatus === 'available' && username.toLowerCase() !== user.username.toLowerCase() && (
+                  <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-mono">
+                    <CheckCircle2 size={10} /> Available
+                  </span>
+                )}
+              </div>
+
+              <div className={`flex items-center bg-[#101010] border rounded-xl px-3.5 py-2 transition-colors ${
+                usernameStatus === 'taken' || usernameStatus === 'invalid'
+                  ? 'border-red-500/80 bg-red-950/10'
+                  : usernameStatus === 'available' && username.toLowerCase() !== user.username.toLowerCase()
+                  ? 'border-emerald-500/60'
+                  : 'border-[#20242C] focus-within:border-[#2166FF]'
+              }`}>
                 <span className="text-xs text-[#9298A3] mr-1">@</span>
                 <input
                   type="text"
                   value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  onChange={(e) => handleUsernameChange(e.target.value)}
                   className="w-full bg-transparent text-xs text-white focus:outline-none"
                   required
                 />
+                {usernameStatus === 'taken' && <AlertCircle size={14} className="text-red-400 shrink-0 ml-1" />}
+                {usernameStatus === 'available' && username.toLowerCase() !== user.username.toLowerCase() && (
+                  <Check size={14} className="text-emerald-400 shrink-0 ml-1" />
+                )}
               </div>
+
+              {/* Error if taken or invalid */}
+              {usernameError && (
+                <p className="text-[11px] text-red-400 mt-1 flex items-center gap-1 font-medium">
+                  <AlertCircle size={12} className="shrink-0" />
+                  <span>{usernameError}</span>
+                </p>
+              )}
+
+              {/* Suggestions that work */}
+              {usernameSuggestions.length > 0 && (
+                <div className="mt-2 p-2.5 rounded-xl bg-[#121622] border border-[#202738] space-y-1.5 animate-fade-in">
+                  <p className="text-[10px] text-[#8A92A6] uppercase tracking-wider font-semibold">
+                    Suggested usernames that work (click to use):
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {usernameSuggestions.map((sug) => (
+                      <button
+                        key={sug}
+                        type="button"
+                        onClick={() => handleApplySuggestion(sug)}
+                        className="px-2.5 py-1 rounded-lg text-xs font-mono font-semibold bg-[#2166FF]/15 hover:bg-[#2166FF] text-[#3B82FF] hover:text-white border border-[#2166FF]/30 transition-all cursor-pointer"
+                      >
+                        @{sug}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Bio */}
@@ -338,7 +487,8 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
             <div className="pt-3 border-t border-[#20242C]/60 flex items-center gap-2 shrink-0">
               <button
                 type="submit"
-                className="flex-1 py-2.5 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] active:scale-95 text-xs font-semibold text-white flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md shadow-[#2166FF]/25"
+                disabled={usernameStatus === 'taken' || usernameStatus === 'invalid' || usernameStatus === 'checking'}
+                className="flex-1 py-2.5 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] active:scale-95 disabled:bg-[#121622] disabled:text-[#8A92A6]/40 text-xs font-semibold text-white flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md shadow-[#2166FF]/25 disabled:cursor-not-allowed"
               >
                 <Check size={16} />
                 <span>Save Profile Changes</span>

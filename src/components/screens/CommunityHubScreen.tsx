@@ -17,11 +17,13 @@ import {
   Edit3,
   X,
   UserCheck,
-  UserPlus
+  UserPlus,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 import { Author, Community, CommunityPost, Post } from '../../types';
 import { CommunityModeratorModal } from '../modals/CommunityModeratorModal';
-import { getSafeUUID } from '../../lib/supabase';
+import { getSafeUUID, toDeterministicUUID } from '../../lib/supabase';
 
 interface CommunityHubScreenProps {
   community: Community;
@@ -34,10 +36,12 @@ interface CommunityHubScreenProps {
   onDeclineJoinRequest?: (communityId: string, requestId: string) => void;
   onRequestJoin?: (communityId: string) => void;
   communityPosts?: CommunityPost[];
-  onCreateDiscussion?: (post: Partial<CommunityPost>) => void;
+  onCreateDiscussion?: (post: Partial<CommunityPost> & { isDailyProof?: boolean }) => void;
   onVoteDiscussion?: (postId: string, direction: 'up' | 'down') => void;
   onOpenComments?: (post: Post) => void;
   onOpenShare?: (post: Post) => void;
+  onPostAsDailyProof?: (content: string, photoUrl?: string, communityName?: string) => void;
+  allPosts?: Post[];
 }
 
 export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
@@ -55,10 +59,13 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
   onCreateDiscussion,
   onVoteDiscussion,
   onOpenComments,
+  onPostAsDailyProof,
+  allPosts,
 }) => {
   const [activeCategory, setActiveCategory] = useState<'All' | 'Discussion' | 'Question' | 'Advice' | 'Story' | 'Milestone'>('All');
   const [composerCategory, setComposerCategory] = useState<'Discussion' | 'Question' | 'Advice' | 'Story' | 'Milestone'>('Discussion');
   const [isComposerExpanded, setIsComposerExpanded] = useState(false);
+  const [addAsDailyProof, setAddAsDailyProof] = useState(false);
   const [newPostTitle, setNewPostTitle] = useState('');
   const [activeSort, setActiveSort] = useState<'Hot' | 'New' | 'Top'>('Hot');
   const [searchQuery, setSearchQuery] = useState('');
@@ -180,9 +187,10 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
     };
 
     setLocalPosts(prev => [newPost, ...prev]);
-    onCreateDiscussion?.(newPost);
+    onCreateDiscussion?.({ ...newPost, isDailyProof: addAsDailyProof });
     setNewPostText('');
     setNewPostTitle('');
+    setAddAsDailyProof(false);
     setIsComposerExpanded(false);
   };
 
@@ -460,6 +468,19 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
             </button>
           ))}
         </div>
+
+        {/* Feature 3: Option "Add as daily proof" */}
+        {isComposerExpanded && (
+          <div
+            onClick={() => setAddAsDailyProof(!addAsDailyProof)}
+            className="flex items-center gap-2 pt-1 text-xs text-[#8A92A6] hover:text-white cursor-pointer select-none"
+          >
+            <div className="text-[#2166FF]">
+              {addAsDailyProof ? <CheckSquare size={15} /> : <Square size={15} />}
+            </div>
+            <span className="text-[11px] font-medium">Add as daily proof (posts to public feed)</span>
+          </div>
+        )}
       </form>
 
       {/* Filter Chips & Sorting Pills */}
@@ -616,6 +637,7 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
                   <button
                     onClick={() => {
                       if (onOpenComments) {
+                        const matchPost = allPosts?.find((p) => p.id === post.id || toDeterministicUUID(p.id) === post.id || p.id === toDeterministicUUID(post.id));
                         onOpenComments({
                           id: post.id,
                           author: {
@@ -628,8 +650,8 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
                           purpose: 'Insight',
                           content: `${post.title ? post.title + '\n\n' : ''}${post.content}`,
                           likesCount: post.upvotes || 0,
-                          commentsCount: post.commentsCount || 0,
-                          comments: [],
+                          commentsCount: Math.max(post.commentsCount || 0, matchPost?.commentsCount || 0),
+                          comments: matchPost?.comments || [],
                           communityId: community.id,
                           communityName: community.name,
                         });
@@ -640,6 +662,25 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
                     <MessageSquare size={13} />
                     <span>{post.commentsCount} Comments</span>
                   </button>
+
+                  {/* Feature 3: Option beside community post - add as daily proof */}
+                  {onPostAsDailyProof && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onPostAsDailyProof(
+                          `💬 [Discussion in ${community.name}]\n\n${post.title ? post.title + '\n\n' : ''}${post.content}`,
+                          undefined,
+                          community.name
+                        );
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#101010] hover:bg-[#2166FF]/20 text-[#9298A3] hover:text-[#3B82FF] border border-[#20242C] transition-colors cursor-pointer"
+                      title="Post as daily proof to accountability feed"
+                    >
+                      <Share2 size={13} />
+                      <span>Add as daily proof</span>
+                    </button>
+                  )}
 
                   <button
                     onClick={() => {

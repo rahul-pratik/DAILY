@@ -22,7 +22,8 @@ import {
   Send,
   BarChart3,
   Activity,
-  Sparkles
+  Sparkles,
+  Trash2
 } from 'lucide-react';
 import { Author, Challenge, Squad, SquadMember } from '../../types';
 
@@ -45,6 +46,8 @@ interface ChallengesScreenProps {
   onEnterChallengeWithSquad?: (squadId: string, challengeId: string) => void;
   onAcceptSquadEntry?: (squadId: string, username: string) => void;
   onAcceptAllSquadEntry?: (squadId: string) => void;
+  onDeleteSquad?: (squadId: string) => void;
+  onDeleteChallenge?: (challengeId: string) => void;
 }
 
 export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
@@ -65,12 +68,18 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
   onEnterChallengeWithSquad,
   onAcceptSquadEntry,
   onAcceptAllSquadEntry,
+  onDeleteSquad,
+  onDeleteChallenge,
 }) => {
   // Top 3-tab view mode: 'challenges' | 'squad_status' | 'manage_squads'
   const [viewMode, setViewMode] = useState<'challenges' | 'squad_status' | 'manage_squads'>('challenges');
   const [activeFilter, setActiveFilter] = useState<'all' | 'squads' | 'solo' | 'joined'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string>('#All Tags');
+
+  // Deletion confirm states (Creator only)
+  const [squadToDelete, setSquadToDelete] = useState<Squad | null>(null);
+  const [challengeToDelete, setChallengeToDelete] = useState<Challenge | null>(null);
 
   // Track which members missed their daily photo proof / check-in
   // Map of squadId/challengeId -> list of usernames who missed
@@ -620,6 +629,22 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
+                    {/* Feature 2: Creator delete button in manage squads */}
+                    {Boolean(
+                      (squad.creator?.username && currentUser?.username && squad.creator.username.toLowerCase() === currentUser.username.toLowerCase()) ||
+                      (squad as any)?.creatorId === currentUser?.id
+                    ) && onDeleteSquad && (
+                      <button
+                        type="button"
+                        onClick={() => setSquadToDelete(squad)}
+                        className="p-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-all cursor-pointer"
+                        title="Delete Squad (Creator only)"
+                        aria-label="Delete Squad"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       onClick={() => setInvitingSquadId(squad.id)}
@@ -1008,18 +1033,40 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                       )}
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => onAddToTodoList(challenge)}
-                      className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all shrink-0 cursor-pointer ${
-                        isInToDo
-                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                          : 'bg-[#121622] hover:bg-[#1A2234] text-[#8A92A6] hover:text-white border border-[#202738]'
-                      }`}
-                    >
-                      {isInToDo ? <Check size={11} /> : <Calendar size={11} className="text-[#3B82FF]" />}
-                      <span>{isInToDo ? 'In To-Do' : '+ To-Do'}</span>
-                    </button>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {/* Feature 2: Creator delete button for challenges */}
+                      {Boolean(
+                        challenge.creator?.username &&
+                        currentUser?.username &&
+                        challenge.creator.username.toLowerCase() === currentUser.username.toLowerCase()
+                      ) && onDeleteChallenge && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setChallengeToDelete(challenge);
+                          }}
+                          className="p-1.5 rounded-full bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-all cursor-pointer"
+                          title="Delete Challenge (Creator only)"
+                          aria-label="Delete Challenge"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => onAddToTodoList(challenge)}
+                        className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all shrink-0 cursor-pointer ${
+                          isInToDo
+                            ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                            : 'bg-[#121622] hover:bg-[#1A2234] text-[#8A92A6] hover:text-white border border-[#202738]'
+                        }`}
+                      >
+                        {isInToDo ? <Check size={11} /> : <Calendar size={11} className="text-[#3B82FF]" />}
+                        <span>{isInToDo ? 'In To-Do' : '+ To-Do'}</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Minimalist WHAT YOU PERFORM Quote Accent */}
@@ -1357,6 +1404,86 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Creator-only Delete Squad Confirmation Modal */}
+      {squadToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-3xl bg-[#090C13] border border-red-500/30 p-5 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-red-500/15 border border-red-500/30 flex items-center justify-center text-red-400 shrink-0">
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Delete Squad?</h3>
+                <p className="text-xs text-[#8A92A6]">Only the squad creator can delete this squad. This action cannot be undone.</p>
+              </div>
+            </div>
+            <p className="text-xs text-white/80 bg-[#121622] p-3 rounded-xl border border-[#202738]">
+              Are you sure you want to delete <strong className="text-white">"{squadToDelete.name}"</strong>?
+            </p>
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setSquadToDelete(null)}
+                className="flex-1 py-2.5 rounded-xl bg-[#141926] hover:bg-[#1E2433] text-xs font-semibold text-[#8A92A6] hover:text-white border border-[#202738] transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const id = squadToDelete.id;
+                  setSquadToDelete(null);
+                  onDeleteSquad?.(id);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 active:scale-95 text-xs font-semibold text-white transition-all cursor-pointer shadow-md shadow-red-600/30"
+              >
+                Yes, Delete Squad
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Creator-only Delete Challenge Confirmation Modal */}
+      {challengeToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-3xl bg-[#090C13] border border-red-500/30 p-5 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-red-500/15 border border-red-500/30 flex items-center justify-center text-red-400 shrink-0">
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Delete Challenge?</h3>
+                <p className="text-xs text-[#8A92A6]">Only you as the creator can delete this challenge.</p>
+              </div>
+            </div>
+            <p className="text-xs text-white/80 bg-[#121622] p-3 rounded-xl border border-[#202738]">
+              Are you sure you want to delete <strong className="text-white">"{challengeToDelete.title}"</strong>?
+            </p>
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setChallengeToDelete(null)}
+                className="flex-1 py-2.5 rounded-xl bg-[#141926] hover:bg-[#1E2433] text-xs font-semibold text-[#8A92A6] hover:text-white border border-[#202738] transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const id = challengeToDelete.id;
+                  setChallengeToDelete(null);
+                  onDeleteChallenge?.(id);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 active:scale-95 text-xs font-semibold text-white transition-all cursor-pointer shadow-md shadow-red-600/30"
+              >
+                Yes, Delete Challenge
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Send, Heart } from 'lucide-react';
+import { X, Send, Heart, Trash2 } from 'lucide-react';
 import { Author, Comment, Post } from '../../types';
 
 interface CommentsModalProps {
@@ -7,6 +7,7 @@ interface CommentsModalProps {
   currentUser: Author;
   onClose: () => void;
   onAddComment: (postId: string, text: string) => void;
+  onDeleteComment?: (postId: string, commentId: string) => void;
   onNavigateAuthorProfile?: (author: Author) => void;
 }
 
@@ -15,6 +16,7 @@ export const CommentsModal: React.FC<CommentsModalProps> = ({
   currentUser,
   onClose,
   onAddComment,
+  onDeleteComment,
   onNavigateAuthorProfile,
 }) => {
   const [commentText, setCommentText] = useState('');
@@ -107,9 +109,25 @@ export const CommentsModal: React.FC<CommentsModalProps> = ({
                 <p className="text-xs text-white/90 leading-relaxed mb-1">
                   {comment.text}
                 </p>
-                <div className="flex items-center gap-1 text-[11px] text-[#9298A3]">
-                  <Heart size={12} className="hover:text-[#2166FF] cursor-pointer" />
-                  <span className="tabular-nums font-mono">{comment.likes}</span>
+                <div className="flex items-center justify-between text-[11px] text-[#9298A3]">
+                  <div className="flex items-center gap-1">
+                    <Heart size={12} className="hover:text-[#2166FF] cursor-pointer" />
+                    <span className="tabular-nums font-mono">{comment.likes}</span>
+                  </div>
+
+                  {Boolean(
+                    (comment.author.username && currentUser?.username && comment.author.username.toLowerCase() === currentUser.username.toLowerCase()) ||
+                    (comment.author.id && currentUser?.id && comment.author.id === currentUser.id)
+                  ) && onDeleteComment && (
+                    <button
+                      type="button"
+                      onClick={() => onDeleteComment(post.id, comment.id)}
+                      className="text-[#9298A3] hover:text-red-400 p-0.5 transition-colors cursor-pointer"
+                      title="Delete your comment"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

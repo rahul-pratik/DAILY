@@ -22,7 +22,9 @@ import {
   ExternalLink,
   ShieldCheck,
   CheckCircle2,
-  Share2
+  Share2,
+  Trash2,
+  Sparkles
 } from 'lucide-react';
 import { Author, Challenge, Community, Post } from '../../types';
 
@@ -45,6 +47,7 @@ interface ProfileScreenProps {
   onSelectCommunity?: (community: Community) => void;
   onOpenShare?: (post: Post) => void;
   onToggleSave?: (postId: string) => void;
+  onDeletePost?: (postId: string) => void;
 }
 
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({
@@ -66,6 +69,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   onSelectCommunity,
   onOpenShare,
   onToggleSave,
+  onDeletePost,
 }) => {
   // Tabs: strictly ONLY posts | saved | following per user requirement
   const [activeTab, setActiveTab] = useState<'posts' | 'saved' | 'following'>('posts');
@@ -73,6 +77,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   // Local state for privacy toggle to guarantee instant UI feedback
   const [hubPrivacy, setHubPrivacy] = useState<'public' | 'private'>(user.accountabilityHubPrivacy || 'public');
   const [privateHubAlert, setPrivateHubAlert] = useState(false);
+  const [postToDelete, setPostToDelete] = useState<Post | null>(null);
 
   const isSelf = user.isCurrentUser;
 
@@ -495,9 +500,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                 className="p-4 rounded-3xl bg-[#080B10] hover:bg-[#101010] border border-[#20242C] transition-all cursor-pointer group"
               >
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] font-semibold text-[#3B82FF] bg-[#2166FF]/15 px-2.5 py-0.5 rounded-full border border-[#2166FF]/20">
-                    {post.purpose || 'Progress'}
-                  </span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[11px] font-semibold text-[#3B82FF] bg-[#2166FF]/15 px-2.5 py-0.5 rounded-full border border-[#2166FF]/20">
+                      {post.purpose || 'Progress'}
+                    </span>
+                    {post.isDailyProof && (
+                      <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/15 px-2 py-0.5 rounded-full border border-emerald-500/30 flex items-center gap-1">
+                        <Sparkles size={10} />
+                        <span>Daily Proof{post.proofDay ? ` • Day ${post.proofDay}` : ''}</span>
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs text-[#9298A3] font-mono">{post.timestamp}</span>
                 </div>
 
@@ -528,18 +541,37 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                     </span>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onOpenShare?.(post);
-                    }}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#101010] hover:bg-[#2166FF]/20 text-[#9298A3] hover:text-[#3B82FF] border border-[#20242C] transition-colors cursor-pointer"
-                    title="Share to community"
-                  >
-                    <Share2 size={13} />
-                    <span className="text-[11px]">Share</span>
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    {/* Feature 2: Delete button for user's own posts */}
+                    {(isSelf || post.author.username === user.username) && onDeletePost && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPostToDelete(post);
+                        }}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-colors cursor-pointer"
+                        title="Delete post"
+                        aria-label="Delete post"
+                      >
+                        <Trash2 size={12} />
+                        <span className="text-[11px]">Delete</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenShare?.(post);
+                      }}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#101010] hover:bg-[#2166FF]/20 text-[#9298A3] hover:text-[#3B82FF] border border-[#20242C] transition-colors cursor-pointer"
+                      title="Share to community"
+                    >
+                      <Share2 size={13} />
+                      <span className="text-[11px]">Share</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -740,6 +772,48 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           </div>
         )}
       </div>
+
+      {/* Delete Post Confirmation Modal */}
+      {postToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-3xl bg-[#090C13] border border-red-500/30 p-5 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-red-500/15 border border-red-500/30 flex items-center justify-center text-red-400 shrink-0">
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Delete Post?</h3>
+                <p className="text-xs text-[#8A92A6]">This post will be permanently deleted from your profile and the public feed.</p>
+              </div>
+            </div>
+
+            <div className="bg-[#121622] p-3 rounded-xl border border-[#202738] text-xs text-white/80 line-clamp-3">
+              "{postToDelete.content}"
+            </div>
+
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setPostToDelete(null)}
+                className="flex-1 py-2.5 rounded-xl bg-[#141926] hover:bg-[#1E2433] text-xs font-semibold text-[#8A92A6] hover:text-white border border-[#202738] transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const id = postToDelete.id;
+                  setPostToDelete(null);
+                  onDeletePost?.(id);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 active:scale-95 text-xs font-semibold text-white transition-all cursor-pointer shadow-md shadow-red-600/30"
+              >
+                Yes, Delete Post
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

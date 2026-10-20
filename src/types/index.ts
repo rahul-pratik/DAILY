@@ -48,6 +48,8 @@ export interface CommunityPost {
   timestamp: string;
   commentsCount: number;
   isPinned?: boolean;
+  isDailyProof?: boolean;
+  photoUrl?: string;
 }
 
 export interface CohortProof {
@@ -102,6 +104,9 @@ export interface Post {
   communityName?: string;
   sharedPost?: Post;
   mentionedAuthor?: Author;
+  isDailyProof?: boolean;
+  proofDay?: number;
+  challengeTitle?: string;
 }
 
 export interface SquadMember {

@@ -16,12 +16,19 @@ import {
   ShieldCheck,
   Camera,
   Crop,
-  Upload
+  Upload,
+  CheckSquare,
+  Square,
+  FileText,
+  Shield,
+  Flame,
+  Users as UsersIcon
 } from 'lucide-react';
 import { Author } from '../../types';
 import { supabase, syncProfileToSupabase, isValidUUID, uploadMediaToSupabase } from '../../lib/supabase';
 import { OTHER_USERS } from '../../data/initialData';
 import { ImageCropModal } from '../modals/ImageCropModal';
+import { PRIVACY_POLICY_CONTENT, TERMS_AND_CONDITIONS_CONTENT } from '../../data/legalText';
 
 interface OnboardingAuthScreenProps {
   onComplete: (user: Author, selectedInterests: string[], authSession?: { provider: 'google' | 'email' | 'guest'; email?: string }) => void;
@@ -29,14 +36,18 @@ interface OnboardingAuthScreenProps {
   allCommunities?: any[];
 }
 
+export type OnboardingStep = 'welcome' | 'terms' | 'auth' | 'profile';
+
 export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
   onComplete,
   initialUser,
 }) => {
-  // Two screens: 1: login/signup, 2: name, username, bio
-  const [screen, setScreen] = useState<1 | 2>(1);
+  // 4 onboarding steps: 'welcome' -> 'terms' -> 'auth' -> 'profile'
+  const [step, setStep] = useState<OnboardingStep>('welcome');
+  const [termsTab, setTermsTab] = useState<'privacy' | 'terms'>('privacy');
+  const [hasAcceptedTerms, setHasAcceptedTerms] = useState<boolean>(false);
 
-  // Screen 1: Auth state
+  // Auth state
   const [authMode, setAuthMode] = useState<'signup' | 'login'>('signup');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -154,8 +165,8 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
           checkUsernameAvailability(rawHandle, u.id);
         }
 
-        // Advance to Screen 2 to prompt for custom Name, Username, and Bio for new signups
-        setScreen(2);
+        // Advance to Step 'profile' to prompt for custom Name, Username, and Bio for new signups
+        setStep('profile');
       }
     });
   }, []);
@@ -290,6 +301,18 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
     setAppleAlert(true);
   };
 
+  const handleContinueAsGuest = () => {
+    setAuthProvider('guest');
+    const guestId = `guest_${Date.now()}`;
+    setUserId(guestId);
+    const randomNum = Math.floor(100 + Math.random() * 899);
+    setName(`Daily Builder`);
+    const guestUsername = `builder_${randomNum}`;
+    setUsername(guestUsername);
+    checkUsernameAvailability(guestUsername, guestId);
+    setStep('profile');
+  };
+
   // Handle Email Login / Signup via Supabase
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -376,7 +399,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
           setName(derivedName);
           setUsername(derivedUsername);
           checkUsernameAvailability(derivedUsername, data.user.id);
-          setScreen(2);
+          setStep('profile');
         } else if (data?.user) {
           // Email confirmation is required by Supabase project settings
           setUserId(data.user.id);
@@ -497,6 +520,52 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
     });
   };
 
+  const renderLegalDocument = (content: string) => {
+    return content.split('\n\n').map((paragraph, idx) => {
+      const trimmed = paragraph.trim();
+      if (!trimmed) return null;
+      if (trimmed.startsWith('# ')) {
+        return (
+          <h2 key={idx} className="text-sm font-bold text-white mb-2 pt-1 border-b border-[#202738] pb-1">
+            {trimmed.replace('# ', '')}
+          </h2>
+        );
+      }
+      if (trimmed.startsWith('## ')) {
+        return (
+          <h3 key={idx} className="text-xs font-bold text-[#3B82FF] uppercase tracking-wider mt-3 mb-1">
+            {trimmed.replace('## ', '')}
+          </h3>
+        );
+      }
+      if (trimmed.startsWith('### ')) {
+        return (
+          <h4 key={idx} className="text-xs font-semibold text-white/95 mt-2 mb-0.5">
+            {trimmed.replace('### ', '')}
+          </h4>
+        );
+      }
+      if (trimmed.startsWith('- ')) {
+        const items = trimmed.split('\n').filter(Boolean);
+        return (
+          <ul key={idx} className="list-disc list-inside space-y-1 text-[11px] text-[#9298A3] my-1">
+            {items.map((item, iIdx) => (
+              <li key={iIdx}>{item.replace(/^-\s*/, '')}</li>
+            ))}
+          </ul>
+        );
+      }
+      return (
+        <p key={idx} className="text-[11px] text-[#9298A3] leading-relaxed my-1">
+          {trimmed}
+        </p>
+      );
+    });
+  };
+
+  const stepNumber = step === 'welcome' ? 1 : step === 'terms' ? 2 : step === 'auth' ? 3 : 4;
+  const stepLabel = step === 'welcome' ? 'Welcome' : step === 'terms' ? 'Terms & Privacy' : step === 'auth' ? 'Sign In' : 'Profile';
+
   return (
     <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-4 relative overflow-hidden">
       {/* Background Glow */}
@@ -506,30 +575,196 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
       <div className="w-full max-w-md bg-[#080B10] border border-[#20242C] rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10 backdrop-blur-xl">
         
         {/* Step indicator */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-6 pb-2 border-b border-[#20242C]/60">
           <div className="flex items-center gap-2">
             <span className="text-sm font-extrabold tracking-wider text-white">
               DAILY<span className="text-[#2166FF]">.</span>
             </span>
             <span className="text-[10px] font-mono text-[#9298A3] bg-[#121620] px-2 py-0.5 rounded-full border border-[#20242C]">
-              Step {screen} of 2
+              Step {stepNumber} of 4: {stepLabel}
             </span>
           </div>
 
-          {screen === 2 && (
+          {step === 'terms' && (
             <button
               type="button"
-              onClick={() => setScreen(1)}
+              onClick={() => setStep('welcome')}
               className="text-xs text-[#9298A3] hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
             >
               <ChevronLeft size={14} />
-              <span>Back to Login</span>
+              <span>Back</span>
+            </button>
+          )}
+
+          {step === 'auth' && (
+            <button
+              type="button"
+              onClick={() => setStep('terms')}
+              className="text-xs text-[#9298A3] hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
+            >
+              <ChevronLeft size={14} />
+              <span>Terms</span>
+            </button>
+          )}
+
+          {step === 'profile' && (
+            <button
+              type="button"
+              onClick={() => setStep('auth')}
+              className="text-xs text-[#9298A3] hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
+            >
+              <ChevronLeft size={14} />
+              <span>Login</span>
             </button>
           )}
         </div>
 
-        {/* ================= SCREEN 1: LOGIN / SIGNUP ================= */}
-        {screen === 1 && (
+        {/* ================= STEP 1: WELCOME TO DAILY ================= */}
+        {step === 'welcome' && (
+          <div className="space-y-6 animate-fade-in text-center">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-[#2166FF] to-[#3B82FF] mx-auto flex items-center justify-center text-white shadow-xl shadow-[#2166FF]/30">
+              <Flame size={32} />
+            </div>
+
+            <div className="space-y-2">
+              <span className="inline-block px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-[#2166FF]/15 text-[#3B82FF] border border-[#2166FF]/30">
+                Show Up. Show The Work.
+              </span>
+              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
+                Welcome to DAILY<span className="text-[#2166FF]">.</span>
+              </h1>
+              <p className="text-xs text-[#8A92A6] max-w-xs mx-auto leading-relaxed">
+                The purpose-driven social platform for real builders, runners, and makers who prove consistency every single day.
+              </p>
+            </div>
+
+            {/* Feature Highlights */}
+            <div className="space-y-2.5 text-left pt-1">
+              <div className="p-3 rounded-2xl bg-[#121620] border border-[#202738] flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-[#2166FF]/20 text-[#3B82FF] flex items-center justify-center shrink-0 mt-0.5">
+                  <Camera size={16} />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-white">Live Progress Photo Proofs</h3>
+                  <p className="text-[11px] text-[#8A92A6]">Open camera, photograph verified work, and track authentic discipline streaks.</p>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-[#121620] border border-[#202738] flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
+                  <UsersIcon size={16} />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-white">5-Member Squad Accountability</h3>
+                  <p className="text-[11px] text-[#8A92A6]">Team sprints where everyone must check in daily. If one slips, the sprint resets.</p>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-[#121620] border border-[#202738] flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0 mt-0.5">
+                  <Sparkles size={16} />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-white">Public Proof Feeds</h3>
+                  <p className="text-[11px] text-[#8A92A6]">Every community post and challenge milestone converts into verified daily proof.</p>
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setStep('terms')}
+              className="w-full py-3 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] active:scale-95 text-xs font-bold text-white flex items-center justify-center gap-2 shadow-lg shadow-[#2166FF]/25 transition-all cursor-pointer"
+            >
+              <span>Get Started</span>
+              <ArrowRight size={15} />
+            </button>
+          </div>
+        )}
+
+        {/* ================= STEP 2: TERMS AND CONDITIONS & PRIVACY POLICY ================= */}
+        {step === 'terms' && (
+          <div className="space-y-4 animate-fade-in">
+            <div className="text-center space-y-1">
+              <h1 className="text-xl font-bold tracking-tight text-white flex items-center justify-center gap-2">
+                <Shield size={18} className="text-[#3B82FF]" />
+                <span>Terms & Privacy Policy</span>
+              </h1>
+              <p className="text-xs text-[#8A92A6]">
+                Please review and accept our policies before creating your Daily account.
+              </p>
+            </div>
+
+            {/* Tab switch between Privacy Policy and Terms & Conditions */}
+            <div className="flex bg-[#121620] p-1 rounded-xl border border-[#202738] text-xs">
+              <button
+                type="button"
+                onClick={() => setTermsTab('privacy')}
+                className={`flex-1 py-1.5 rounded-lg font-semibold transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
+                  termsTab === 'privacy'
+                    ? 'bg-[#2166FF] text-white shadow-sm'
+                    : 'text-[#8A92A6] hover:text-white'
+                }`}
+              >
+                <FileText size={13} />
+                <span>Privacy Policy</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setTermsTab('terms')}
+                className={`flex-1 py-1.5 rounded-lg font-semibold transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
+                  termsTab === 'terms'
+                    ? 'bg-[#2166FF] text-white shadow-sm'
+                    : 'text-[#8A92A6] hover:text-white'
+                }`}
+              >
+                <ShieldCheck size={13} />
+                <span>Terms & Conditions</span>
+              </button>
+            </div>
+
+            {/* Scrollable Reader */}
+            <div className="max-h-60 overflow-y-auto p-3.5 bg-[#0D1017] border border-[#202738] rounded-2xl text-left text-xs leading-relaxed space-y-2 select-text scrollbar-thin scrollbar-thumb-[#202738]">
+              {renderLegalDocument(termsTab === 'privacy' ? PRIVACY_POLICY_CONTENT : TERMS_AND_CONDITIONS_CONTENT)}
+            </div>
+
+            {/* Agreement Checkbox */}
+            <div
+              onClick={() => setHasAcceptedTerms(!hasAcceptedTerms)}
+              className="p-3 rounded-xl bg-[#121620] border border-[#202738] flex items-start gap-2.5 cursor-pointer hover:border-[#2166FF]/40 transition-colors"
+            >
+              <div className="text-[#2166FF] mt-0.5 shrink-0">
+                {hasAcceptedTerms ? <CheckSquare size={17} /> : <Square size={17} className="text-[#555E70]" />}
+              </div>
+              <p className="text-xs text-white/90 select-none leading-snug">
+                I have read and agree to the <strong className="text-white">Daily Privacy Policy</strong> and <strong className="text-white">Terms & Conditions</strong>.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setStep('welcome')}
+                className="py-2.5 px-3.5 rounded-xl bg-[#121620] hover:bg-[#1A2030] text-xs font-semibold text-[#8A92A6] hover:text-white border border-[#202738] transition-colors cursor-pointer"
+              >
+                Back
+              </button>
+
+              <button
+                type="button"
+                disabled={!hasAcceptedTerms}
+                onClick={() => setStep('auth')}
+                className="flex-1 py-2.5 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold text-white flex items-center justify-center gap-1.5 shadow-md shadow-[#2166FF]/25 transition-all cursor-pointer"
+              >
+                <span>Accept & Continue</span>
+                <ArrowRight size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ================= STEP 3: LOGIN / SIGNUP ================= */}
+        {step === 'auth' && (
           <div className="space-y-5 animate-fade-in">
             <div className="text-center space-y-1">
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
@@ -650,6 +885,16 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                 </svg>
                 <span>Continue with Apple</span>
               </button>
+
+              {/* Continue as Guest Button */}
+              <button
+                type="button"
+                onClick={handleContinueAsGuest}
+                className="w-full py-2.5 px-4 rounded-xl bg-[#121620] hover:bg-[#1A2030] border border-[#202738] text-xs font-semibold text-white flex items-center justify-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <User size={15} className="text-[#8A92A6]" />
+                <span>Continue as Guest</span>
+              </button>
             </div>
 
             <div className="flex items-center gap-2 text-[10px] text-[#555E70] uppercase tracking-wider font-mono">
@@ -755,8 +1000,8 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
           </div>
         )}
 
-        {/* ================= SCREEN 2: NAME, UNIQUE USERNAME, BIO ================= */}
-        {screen === 2 && (
+        {/* ================= STEP 4: NAME, UNIQUE USERNAME, BIO ================= */}
+        {step === 'profile' && (
           <form onSubmit={handleFinish} className="space-y-4 animate-fade-in">
             <div className="text-center space-y-1">
               <h2 className="text-xl font-bold tracking-tight text-white flex items-center justify-center gap-1.5">

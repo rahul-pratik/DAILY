@@ -356,13 +356,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       </button>
                     )}
                   </div>
-                  <div className="flex items-center gap-1.5 text-xs text-[#9298A3]">
+                  <div className="flex items-center gap-1.5 text-xs text-[#9298A3] flex-wrap">
                     <span>{post.timestamp}</span>
                     {post.purpose && (
                       <>
                         <span aria-hidden="true">·</span>
                         <span className="text-[#3B82FF] font-medium">{post.purpose}</span>
                       </>
+                    )}
+                    {post.isDailyProof && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-semibold text-[10px]">
+                        <Sparkles size={9} />
+                        <span>Daily Proof{post.proofDay ? ` • Day ${post.proofDay}` : ''}</span>
+                      </span>
                     )}
                   </div>
                 </div>
