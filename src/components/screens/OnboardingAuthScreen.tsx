@@ -22,7 +22,9 @@ import {
   FileText,
   Shield,
   Flame,
-  Users as UsersIcon
+  Users as UsersIcon,
+  UsersRound,
+  TrendingUp
 } from 'lucide-react';
 import { Author } from '../../types';
 import { supabase, syncProfileToSupabase, isValidUUID, uploadMediaToSupabase } from '../../lib/supabase';
@@ -57,6 +59,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
   const [authSuccessMessage, setAuthSuccessMessage] = useState<string | null>(null);
   const [appleAlert, setAppleAlert] = useState(false);
   const [authProvider, setAuthProvider] = useState<'google' | 'email' | 'guest'>('email');
+  const [cameFromDirectLogin, setCameFromDirectLogin] = useState(false);
 
   // Screen 2: Name, username, bio, avatar state
   const [name, setName] = useState(initialUser?.name || '');
@@ -563,140 +566,232 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
     });
   };
 
-  const stepNumber = step === 'welcome' ? 1 : step === 'terms' ? 2 : step === 'auth' ? 3 : 4;
-  const stepLabel = step === 'welcome' ? 'Welcome' : step === 'terms' ? 'Terms & Privacy' : step === 'auth' ? 'Sign In' : 'Profile';
-
-  return (
-    <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-4 relative overflow-hidden">
-      {/* Background Glow */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-[#2166FF]/15 rounded-full blur-3xl pointer-events-none" />
-
-      {/* Main Card */}
-      <div className="w-full max-w-md bg-[#080B10] border border-[#20242C] rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10 backdrop-blur-xl">
-        
-        {/* Step indicator */}
-        <div className="flex items-center justify-between mb-6 pb-2 border-b border-[#20242C]/60">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-extrabold tracking-wider text-white">
-              DAILY<span className="text-[#2166FF]">.</span>
-            </span>
-            <span className="text-[10px] font-mono text-[#9298A3] bg-[#121620] px-2 py-0.5 rounded-full border border-[#20242C]">
-              Step {stepNumber} of 4: {stepLabel}
-            </span>
+  // If on the welcome step, render the starting page matching the user's design
+  if (step === 'welcome') {
+    return (
+      <div className="min-h-screen bg-black text-white flex flex-col justify-between px-6 py-10 sm:py-14 max-w-md mx-auto w-full font-sans select-none animate-fade-in relative">
+        {/* Top: Daily Logo + Headline + Subtitle */}
+        <div className="pt-6 sm:pt-10 text-center flex flex-col items-center">
+          {/* Daily Brand Logo matching the uploaded screenshot */}
+          <div className="mb-6 flex items-center justify-center">
+            <svg
+              className="h-12 sm:h-14 w-auto overflow-visible"
+              viewBox="0 0 150 46"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              {/* Custom 'D' with inner play triangle */}
+              <path
+                d="M4 4h14.5c10.8 0 17.5 7.2 17.5 19s-6.7 19-17.5 19H4V4zm7.5 6.5v25h7c6.8 0 10.5-4.8 10.5-12.5S25.3 10.5 18.5 10.5h-7z"
+                fill="#FFFFFF"
+              />
+              {/* Vibrant blue play triangle in bowl */}
+              <path
+                d="M11.5 11.5l14 11.5-14 11.5V11.5z"
+                fill="#2166FF"
+              />
+              {/* 'aily' */}
+              <text
+                x="39"
+                y="37"
+                fill="#FFFFFF"
+                fontSize="41"
+                fontWeight="700"
+                fontFamily="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif"
+                letterSpacing="-0.03em"
+              >
+                aily
+              </text>
+            </svg>
           </div>
 
-          {step === 'terms' && (
+          <h1 className="text-2xl sm:text-[28px] font-bold tracking-tight text-white leading-tight">
+            Show what you’re doing.
+          </h1>
+          <p className="text-sm sm:text-[15px] text-[#8A92A6] mt-2 font-normal">
+            Your progress. Your people. Your world.
+          </p>
+        </div>
+
+        {/* Middle: 4 Feature Rows */}
+        <div className="my-auto py-8 sm:py-10 max-w-xs mx-auto w-full space-y-7 sm:space-y-8">
+          {/* Share / your moments */}
+          <div className="flex items-center gap-5 text-left">
+            <div className="w-9 h-9 flex items-center justify-center shrink-0 text-[#2166FF]">
+              <User size={26} className="stroke-[2.2]" />
+            </div>
+            <div>
+              <h3 className="text-base sm:text-[17px] font-semibold text-white leading-tight">
+                Share
+              </h3>
+              <p className="text-xs sm:text-sm text-[#8A92A6] mt-0.5 font-normal">
+                your moments
+              </p>
+            </div>
+          </div>
+
+          {/* Discover / like-minded people */}
+          <div className="flex items-center gap-5 text-left">
+            <div className="w-9 h-9 flex items-center justify-center shrink-0 text-[#2166FF]">
+              <UsersIcon size={26} className="stroke-[2.2]" />
+            </div>
+            <div>
+              <h3 className="text-base sm:text-[17px] font-semibold text-white leading-tight">
+                Discover
+              </h3>
+              <p className="text-xs sm:text-sm text-[#8A92A6] mt-0.5 font-normal">
+                like-minded people
+              </p>
+            </div>
+          </div>
+
+          {/* Join / communities */}
+          <div className="flex items-center gap-5 text-left">
+            <div className="w-9 h-9 flex items-center justify-center shrink-0 text-[#2166FF]">
+              <UsersRound size={26} className="stroke-[2.2]" />
+            </div>
+            <div>
+              <h3 className="text-base sm:text-[17px] font-semibold text-white leading-tight">
+                Join
+              </h3>
+              <p className="text-xs sm:text-sm text-[#8A92A6] mt-0.5 font-normal">
+                communities
+              </p>
+            </div>
+          </div>
+
+          {/* Track / your progress */}
+          <div className="flex items-center gap-5 text-left">
+            <div className="w-9 h-9 flex items-center justify-center shrink-0 text-[#2166FF]">
+              <TrendingUp size={26} className="stroke-[2.2]" />
+            </div>
+            <div>
+              <h3 className="text-base sm:text-[17px] font-semibold text-white leading-tight">
+                Track
+              </h3>
+              <p className="text-xs sm:text-sm text-[#8A92A6] mt-0.5 font-normal">
+                your progress
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom: Get Started button + Log in link */}
+        <div className="pb-4 sm:pb-6 w-full max-w-sm mx-auto">
+          <button
+            type="button"
+            onClick={() => setStep('terms')}
+            className="w-full h-14 rounded-full bg-[#2166FF] hover:bg-[#3476FF] active:scale-[0.99] text-base font-semibold text-white flex items-center justify-center gap-2.5 shadow-lg shadow-[#2166FF]/25 transition-all cursor-pointer"
+          >
+            <span>Get Started</span>
+            <ArrowRight size={19} className="stroke-[2.5]" />
+          </button>
+
+          <div className="text-center mt-4">
+            <span className="text-xs sm:text-sm text-[#8A92A6]">
+              Already have an account?{' '}
+            </span>
             <button
               type="button"
-              onClick={() => setStep('welcome')}
-              className="text-xs text-[#9298A3] hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
+              onClick={() => {
+                setCameFromDirectLogin(true);
+                setAuthMode('login');
+                setStep('auth');
+              }}
+              className="text-xs sm:text-sm font-semibold text-[#2166FF] hover:text-[#3B82FF] transition-colors cursor-pointer"
+            >
+              Log in
+            </button>
+          </div>
+
+          <div className="text-center mt-2.5">
+            <button
+              type="button"
+              onClick={handleContinueAsGuest}
+              className="text-[11px] text-[#555E70] hover:text-[#8A92A6] transition-colors cursor-pointer"
+            >
+              Explore as Guest
+            </button>
+          </div>
+
+          {/* Mobile indicator bar */}
+          <div className="w-32 h-1 bg-white/20 rounded-full mx-auto mt-6 hidden sm:block" />
+        </div>
+      </div>
+    );
+  }
+
+  const stepNumber = step === 'terms' ? 2 : step === 'auth' ? 3 : 4;
+
+  return (
+    <div className="min-h-screen bg-[#05070B] text-white flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden font-sans">
+      {/* Subtle Minimalist Ambient Sheen */}
+      <div className="absolute inset-0 bg-[radial-gradient(#141B2D_1px,transparent_1px)] [background-size:28px_28px] opacity-20 pointer-events-none" />
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[480px] h-[480px] bg-[#2166FF]/6 rounded-full blur-[140px] pointer-events-none" />
+
+      {/* Main Minimalist Card */}
+      <div className="w-full max-w-lg bg-[#090C13] border border-[#1C2230] rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10">
+        
+        {/* Sleek Minimalist 4-Segment Progress Bar */}
+        <div className="mb-6">
+          <div className="flex items-center justify-between text-xs mb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-black tracking-tight text-white">
+                DAILY<span className="text-[#2166FF]">.</span>
+              </span>
+              <span className="text-[#3B82FF]/40">/</span>
+              <span className="text-[11px] font-mono tracking-wider uppercase text-[#8A92A6]">
+                {step === 'terms' && '02 · Legal Terms'}
+                {step === 'auth' && '03 · Authentication'}
+                {step === 'profile' && '04 · Identity'}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (step === 'terms') setStep('welcome');
+                if (step === 'auth') {
+                  if (cameFromDirectLogin) {
+                    setStep('welcome');
+                  } else {
+                    setStep('terms');
+                  }
+                }
+                if (step === 'profile') setStep('auth');
+              }}
+              className="text-xs text-[#8A92A6] hover:text-white flex items-center gap-1 cursor-pointer transition-colors font-medium"
             >
               <ChevronLeft size={14} />
               <span>Back</span>
             </button>
-          )}
-
-          {step === 'auth' && (
-            <button
-              type="button"
-              onClick={() => setStep('terms')}
-              className="text-xs text-[#9298A3] hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
-            >
-              <ChevronLeft size={14} />
-              <span>Terms</span>
-            </button>
-          )}
-
-          {step === 'profile' && (
-            <button
-              type="button"
-              onClick={() => setStep('auth')}
-              className="text-xs text-[#9298A3] hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
-            >
-              <ChevronLeft size={14} />
-              <span>Login</span>
-            </button>
-          )}
-        </div>
-
-        {/* ================= STEP 1: WELCOME TO DAILY ================= */}
-        {step === 'welcome' && (
-          <div className="space-y-6 animate-fade-in text-center">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-[#2166FF] to-[#3B82FF] mx-auto flex items-center justify-center text-white shadow-xl shadow-[#2166FF]/30">
-              <Flame size={32} />
-            </div>
-
-            <div className="space-y-2">
-              <span className="inline-block px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-[#2166FF]/15 text-[#3B82FF] border border-[#2166FF]/30">
-                Show Up. Show The Work.
-              </span>
-              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
-                Welcome to DAILY<span className="text-[#2166FF]">.</span>
-              </h1>
-              <p className="text-xs text-[#8A92A6] max-w-xs mx-auto leading-relaxed">
-                The purpose-driven social platform for real builders, runners, and makers who prove consistency every single day.
-              </p>
-            </div>
-
-            {/* Feature Highlights */}
-            <div className="space-y-2.5 text-left pt-1">
-              <div className="p-3 rounded-2xl bg-[#121620] border border-[#202738] flex items-start gap-3">
-                <div className="w-8 h-8 rounded-xl bg-[#2166FF]/20 text-[#3B82FF] flex items-center justify-center shrink-0 mt-0.5">
-                  <Camera size={16} />
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold text-white">Live Progress Photo Proofs</h3>
-                  <p className="text-[11px] text-[#8A92A6]">Open camera, photograph verified work, and track authentic discipline streaks.</p>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-2xl bg-[#121620] border border-[#202738] flex items-start gap-3">
-                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
-                  <UsersIcon size={16} />
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold text-white">5-Member Squad Accountability</h3>
-                  <p className="text-[11px] text-[#8A92A6]">Team sprints where everyone must check in daily. If one slips, the sprint resets.</p>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-2xl bg-[#121620] border border-[#202738] flex items-start gap-3">
-                <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0 mt-0.5">
-                  <Sparkles size={16} />
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold text-white">Public Proof Feeds</h3>
-                  <p className="text-[11px] text-[#8A92A6]">Every community post and challenge milestone converts into verified daily proof.</p>
-                </div>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setStep('terms')}
-              className="w-full py-3 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] active:scale-95 text-xs font-bold text-white flex items-center justify-center gap-2 shadow-lg shadow-[#2166FF]/25 transition-all cursor-pointer"
-            >
-              <span>Get Started</span>
-              <ArrowRight size={15} />
-            </button>
           </div>
-        )}
+
+          <div className="grid grid-cols-4 gap-1.5 h-1 w-full bg-white/[0.05] rounded-full overflow-hidden">
+            <div className={`h-full transition-all duration-300 ${stepNumber >= 1 ? 'bg-[#2166FF]' : 'bg-transparent'}`} />
+            <div className={`h-full transition-all duration-300 ${stepNumber >= 2 ? 'bg-[#2166FF]' : 'bg-transparent'}`} />
+            <div className={`h-full transition-all duration-300 ${stepNumber >= 3 ? 'bg-[#2166FF]' : 'bg-transparent'}`} />
+            <div className={`h-full transition-all duration-300 ${stepNumber >= 4 ? 'bg-[#2166FF]' : 'bg-transparent'}`} />
+          </div>
+        </div>
 
         {/* ================= STEP 2: TERMS AND CONDITIONS & PRIVACY POLICY ================= */}
         {step === 'terms' && (
-          <div className="space-y-4 animate-fade-in">
-            <div className="text-center space-y-1">
-              <h1 className="text-xl font-bold tracking-tight text-white flex items-center justify-center gap-2">
-                <Shield size={18} className="text-[#3B82FF]" />
-                <span>Terms & Privacy Policy</span>
+          <div className="space-y-5 animate-fade-in text-left">
+            <div className="space-y-1">
+              <span className="text-[10px] font-mono uppercase tracking-widest text-[#2166FF] font-semibold block">
+                Compliance & Trust
+              </span>
+              <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-white">
+                Terms & Privacy Policy
               </h1>
-              <p className="text-xs text-[#8A92A6]">
+              <p className="text-xs text-[#8A92A6] leading-relaxed">
                 Please review and accept our policies before creating your Daily account.
               </p>
             </div>
 
             {/* Tab switch between Privacy Policy and Terms & Conditions */}
-            <div className="flex bg-[#121620] p-1 rounded-xl border border-[#202738] text-xs">
+            <div className="flex bg-[#0B0F19] p-1 rounded-xl border border-[#1C2230] text-xs">
               <button
                 type="button"
                 onClick={() => setTermsTab('privacy')}
@@ -724,14 +819,14 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
             </div>
 
             {/* Scrollable Reader */}
-            <div className="max-h-60 overflow-y-auto p-3.5 bg-[#0D1017] border border-[#202738] rounded-2xl text-left text-xs leading-relaxed space-y-2 select-text scrollbar-thin scrollbar-thumb-[#202738]">
+            <div className="max-h-60 overflow-y-auto p-4 bg-[#05070B] border border-[#1C2230] rounded-2xl text-left text-xs leading-relaxed space-y-2 select-text scrollbar-thin scrollbar-thumb-white/10">
               {renderLegalDocument(termsTab === 'privacy' ? PRIVACY_POLICY_CONTENT : TERMS_AND_CONDITIONS_CONTENT)}
             </div>
 
             {/* Agreement Checkbox */}
             <div
               onClick={() => setHasAcceptedTerms(!hasAcceptedTerms)}
-              className="p-3 rounded-xl bg-[#121620] border border-[#202738] flex items-start gap-2.5 cursor-pointer hover:border-[#2166FF]/40 transition-colors"
+              className="p-3.5 rounded-2xl bg-[#0B0F19] border border-[#1C2230] hover:border-[#2A3348] flex items-start gap-3 cursor-pointer transition-colors"
             >
               <div className="text-[#2166FF] mt-0.5 shrink-0">
                 {hasAcceptedTerms ? <CheckSquare size={17} /> : <Square size={17} className="text-[#555E70]" />}
@@ -741,11 +836,11 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
               </p>
             </div>
 
-            <div className="flex items-center gap-2 pt-1">
+            <div className="flex items-center gap-2.5 pt-1">
               <button
                 type="button"
                 onClick={() => setStep('welcome')}
-                className="py-2.5 px-3.5 rounded-xl bg-[#121620] hover:bg-[#1A2030] text-xs font-semibold text-[#8A92A6] hover:text-white border border-[#202738] transition-colors cursor-pointer"
+                className="py-2.5 px-4 rounded-xl bg-[#121622] hover:bg-[#181D2B] text-xs font-semibold text-[#8A92A6] hover:text-white border border-[#202738] transition-colors cursor-pointer"
               >
                 Back
               </button>
@@ -754,7 +849,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                 type="button"
                 disabled={!hasAcceptedTerms}
                 onClick={() => setStep('auth')}
-                className="flex-1 py-2.5 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold text-white flex items-center justify-center gap-1.5 shadow-md shadow-[#2166FF]/25 transition-all cursor-pointer"
+                className="flex-1 py-2.5 rounded-xl bg-[#2166FF] hover:bg-[#3476FF] disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold text-white flex items-center justify-center gap-2 shadow-lg shadow-[#2166FF]/25 transition-all cursor-pointer"
               >
                 <span>Accept & Continue</span>
                 <ArrowRight size={14} />

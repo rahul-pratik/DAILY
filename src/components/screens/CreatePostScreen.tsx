@@ -243,7 +243,7 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
                 className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl text-xs font-medium border transition-all cursor-pointer ${
                   isSelected
                     ? 'bg-[#2166FF]/20 border-[#2166FF] text-white shadow-sm font-semibold'
-                    : 'bg-[#080B10] hover:bg-[#101010] border-[#20242C] text-[#9298A3] hover:text-white'
+                    : 'bg-[#090C13] hover:bg-[#0E121B] border-[#1C2230] text-[#8A92A6] hover:text-white'
                 }`}
               >
                 {chip.icon}
@@ -266,7 +266,7 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
         className={`mb-4 p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
           isDailyProof
             ? 'bg-[#2166FF]/15 border-[#2166FF] shadow-sm'
-            : 'bg-[#080B10] hover:bg-[#101010] border-[#20242C]'
+            : 'bg-[#090C13] hover:bg-[#0E121B] border-[#1C2230]'
         }`}
       >
         <div className="flex items-center gap-2.5">
@@ -343,9 +343,9 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
       {/* Attachment Card: Add photos */}
       <div
         onClick={() => fileInputRef.current?.click()}
-        className="mb-4 p-4 rounded-2xl bg-[#080B10] hover:bg-[#101010] border border-[#20242C] border-dashed transition-all cursor-pointer flex items-center gap-3.5 group"
+        className="mb-4 p-4 rounded-2xl bg-[#090C13] hover:bg-[#0E121B] border border-[#1C2230] border-dashed transition-all cursor-pointer flex items-center gap-3.5 group"
       >
-        <div className="w-10 h-10 rounded-xl bg-[#101010] border border-[#20242C] flex items-center justify-center text-[#3B82FF] group-hover:border-[#2166FF]/60 transition-colors">
+        <div className="w-10 h-10 rounded-xl bg-[#121622] border border-[#202738] flex items-center justify-center text-[#3B82FF] group-hover:border-[#2166FF]/60 transition-colors">
           <ImageIcon size={20} />
         </div>
         <div className="flex-1">

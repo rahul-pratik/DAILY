@@ -269,7 +269,7 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
       )}
 
       {/* Main Challenge Card */}
-      <div className="p-4 rounded-3xl bg-[#080B10] border border-[#20242C] mb-4 space-y-4">
+      <div className="p-4 rounded-2xl bg-[#090C13] border border-[#1C2230] mb-4 space-y-4">
         {/* Badges Row */}
         <div className="flex items-center justify-between text-[11px]">
           <div className="flex items-center gap-1.5">
@@ -279,20 +279,20 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
             </span>
 
             {challenge.tags && challenge.tags[0] && (
-              <span className="px-2.5 py-0.5 rounded-full bg-[#101010] text-[#9298A3] font-medium border border-[#20242C]">
+              <span className="px-2.5 py-0.5 rounded-full bg-[#121622] text-[#8A92A6] font-medium border border-[#202738]">
                 {challenge.tags[0]}
               </span>
             )}
           </div>
 
-          <div className="flex items-center gap-2 text-[#9298A3] font-mono">
+          <div className="flex items-center gap-2 text-[#8A92A6] font-mono">
             <Users size={12} />
             <span>{challenge.participantsCount || 3} joined</span>
           </div>
         </div>
 
         {/* WHAT YOU PERFORM Container */}
-        <div className="p-3.5 rounded-2xl bg-[#101010] border border-[#20242C]">
+        <div className="p-3.5 rounded-xl bg-[#0E121B] border border-[#1C2230]">
           <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#3B82FF] uppercase tracking-wider mb-1.5">
             <Target size={13} />
             <span>WHAT YOU PERFORM</span>

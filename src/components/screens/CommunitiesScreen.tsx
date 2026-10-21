@@ -225,10 +225,10 @@ export const CommunitiesScreen: React.FC<CommunitiesScreenProps> = ({
           return (
             <div
               key={community.id}
-              className="rounded-3xl bg-[#080B10] border border-[#20242C] overflow-hidden transition-all group flex flex-col"
+              className="rounded-2xl bg-[#090C13] border border-[#1C2230] overflow-hidden transition-all group flex flex-col"
             >
               {/* Banner Area */}
-              <div className="h-28 relative bg-[#101010] overflow-hidden">
+              <div className="h-28 relative bg-[#0E121B] overflow-hidden">
                 {community.coverUrl ? (
                   <img
                     src={community.coverUrl}

@@ -264,7 +264,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         </p>
 
         {/* ACCOUNTABILITY HUB PRIVACY SETTING */}
-        <div className="p-3.5 rounded-2xl bg-[#080B10] border border-[#20242C] mb-4 flex items-center justify-between gap-3">
+        <div className="p-3.5 rounded-2xl bg-[#090C13] border border-[#1C2230] mb-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
               hubPrivacy === 'public' ? 'bg-[#2166FF]/15 text-[#3B82FF]' : 'bg-amber-500/15 text-amber-400'
@@ -369,7 +369,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         )}
 
         {/* STATS SECTION: COMMUNITIES JOINED, CHALLENGES COMPLETED, CHALLENGES ONGOING, TOTAL LIKES ACCUMULATED */}
-        <div className="grid grid-cols-4 gap-1 sm:gap-2 py-3 px-2 rounded-2xl bg-[#080B10] border border-[#20242C] mb-4 text-center">
+        <div className="grid grid-cols-4 gap-1 sm:gap-2 py-3 px-2 rounded-2xl bg-[#090C13] border border-[#1C2230] mb-4 text-center">
           {/* 1. Communities Joined */}
           <button 
             type="button"

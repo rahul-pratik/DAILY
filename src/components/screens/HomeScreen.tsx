@@ -248,63 +248,65 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       </div>
 
       {/* What's on your mind? entry trigger */}
-      <div className="px-4 py-3 border-b border-[#20242C]/60">
+      <div className="px-4 py-3 border-b border-[#1C2230]">
         <button
           onClick={onOpenCreate}
-          className="w-full flex items-center gap-3 p-2.5 rounded-full bg-[#080B10] hover:bg-[#101010] border border-[#20242C] transition-colors text-left cursor-pointer group"
+          className="w-full flex items-center gap-3 p-3 rounded-2xl bg-[#090C13] hover:bg-[#0E121B] border border-[#1C2230] hover:border-[#2166FF]/30 transition-all text-left cursor-pointer group"
           aria-label="Create a post"
         >
           <img
             src={currentUser.avatar}
             alt={currentUser.name}
-            className="w-8 h-8 rounded-full object-cover border border-[#20242C]"
+            className="w-8 h-8 rounded-full object-cover border border-[#202738] group-hover:border-[#2166FF] transition-colors"
             referrerPolicy="no-referrer"
           />
-          <span className="text-xs sm:text-sm text-[#9298A3] group-hover:text-white transition-colors">
-            What's on your mind?
+          <span className="text-xs sm:text-sm text-[#8A92A6] group-hover:text-white transition-colors">
+            What's on your mind? Share daily progress...
           </span>
         </button>
       </div>
 
-      {/* Feed Filter Pills & Reload Button */}
-      <div className="px-4 py-3 flex items-center gap-2 border-b border-[#20242C]/40 overflow-x-auto no-scrollbar">
-        <button
-          onClick={() => setActiveFilter('for_you')}
-          className={`px-4 py-1.5 rounded-full text-xs font-semibold tracking-wide transition-all whitespace-nowrap cursor-pointer ${
-            activeFilter === 'for_you'
-              ? 'bg-[#2166FF] text-white shadow-sm shadow-[#2166FF]/30'
-              : 'bg-[#101010] text-[#9298A3] hover:text-white border border-[#20242C]'
-          }`}
-        >
-          For You
-        </button>
-        <button
-          onClick={() => setActiveFilter('following')}
-          className={`px-4 py-1.5 rounded-full text-xs font-semibold tracking-wide transition-all whitespace-nowrap cursor-pointer ${
-            activeFilter === 'following'
-              ? 'bg-[#2166FF] text-white shadow-sm shadow-[#2166FF]/30'
-              : 'bg-[#101010] text-[#9298A3] hover:text-white border border-[#20242C]'
-          }`}
-        >
-          Following
-        </button>
-        <button
-          onClick={() => setActiveFilter('recent')}
-          className={`px-4 py-1.5 rounded-full text-xs font-semibold tracking-wide transition-all whitespace-nowrap cursor-pointer ${
-            activeFilter === 'recent'
-              ? 'bg-[#2166FF] text-white shadow-sm shadow-[#2166FF]/30'
-              : 'bg-[#101010] text-[#9298A3] hover:text-white border border-[#20242C]'
-          }`}
-        >
-          Recent
-        </button>
+      {/* Sleek Segmented Feed Filter & Reload Button */}
+      <div className="px-4 py-2.5 flex items-center justify-between gap-3 border-b border-[#1C2230]">
+        <div className="grid grid-cols-3 gap-1 p-1 bg-[#090C13] border border-[#1C2230] rounded-xl flex-1 max-w-xs">
+          <button
+            onClick={() => setActiveFilter('for_you')}
+            className={`py-1.5 rounded-lg text-xs font-semibold tracking-wide transition-all cursor-pointer ${
+              activeFilter === 'for_you'
+                ? 'bg-[#2166FF] text-white shadow-sm'
+                : 'text-[#8A92A6] hover:text-white'
+            }`}
+          >
+            For You
+          </button>
+          <button
+            onClick={() => setActiveFilter('following')}
+            className={`py-1.5 rounded-lg text-xs font-semibold tracking-wide transition-all cursor-pointer ${
+              activeFilter === 'following'
+                ? 'bg-[#2166FF] text-white shadow-sm'
+                : 'text-[#8A92A6] hover:text-white'
+            }`}
+          >
+            Following
+          </button>
+          <button
+            onClick={() => setActiveFilter('recent')}
+            className={`py-1.5 rounded-lg text-xs font-semibold tracking-wide transition-all cursor-pointer ${
+              activeFilter === 'recent'
+                ? 'bg-[#2166FF] text-white shadow-sm'
+                : 'text-[#8A92A6] hover:text-white'
+            }`}
+          >
+            Recent
+          </button>
+        </div>
 
         {/* Quick Reload Feed Button */}
         <button
           onClick={triggerManualReload}
           disabled={isRefreshing || isRefreshingSupabase}
           title="Reload feed from Supabase"
-          className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-[#8A92A6] hover:text-white bg-[#101010] hover:bg-[#161B26] border border-[#202738] transition-all cursor-pointer shrink-0"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-[#8A92A6] hover:text-white bg-[#090C13] hover:bg-[#121622] border border-[#1C2230] transition-all cursor-pointer shrink-0"
         >
           <RefreshCw size={12} className={isRefreshing || isRefreshingSupabase ? "animate-spin text-[#3B82FF]" : "text-[#8A92A6]"} />
           <span className="hidden sm:inline">Reload</span>
@@ -312,15 +314,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       </div>
 
       {/* Feed List */}
-      <div className="divide-y divide-[#20242C]/60">
+      <div className="divide-y divide-[#1C2230]">
         {filteredPosts.map((post) => (
-          <article key={post.id} className="p-4 hover:bg-[#080B10]/40 transition-colors">
+          <article key={post.id} className="p-4 hover:bg-[#090C13]/70 transition-colors">
             {/* Author Row */}
             <div className="flex items-start justify-between gap-3 mb-2.5">
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => onNavigateAuthorProfile?.(post.author)}
-                  className="w-10 h-10 rounded-full overflow-hidden shrink-0 border border-[#20242C] hover:border-[#2166FF] transition-colors cursor-pointer"
+                  className="w-10 h-10 rounded-full overflow-hidden shrink-0 border border-[#202738] hover:border-[#2166FF] transition-colors cursor-pointer"
                 >
                   <img
                     src={post.author.avatar}
