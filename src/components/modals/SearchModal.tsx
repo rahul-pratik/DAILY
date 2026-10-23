@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Search, X, TrendingUp, Users, Trophy, Loader2 } from 'lucide-react';
+import { Search, X, Users, Trophy, Loader2, Clock, Trash2, TrendingUp, Sparkles } from 'lucide-react';
 import { Author, Challenge, Community, Post } from '../../types';
 import { supabase } from '../../lib/supabase';
 import { OTHER_USERS } from '../../data/initialData';
+
+const RECENT_SEARCHES_KEY = 'daily_recent_searches';
 
 interface SearchModalProps {
   posts: Post[];
@@ -30,6 +32,49 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   const [query, setQuery] = useState('');
   const [supabaseCreators, setSupabaseCreators] = useState<Author[]>([]);
   const [isSearchingProfiles, setIsSearchingProfiles] = useState(false);
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem(RECENT_SEARCHES_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(item => typeof item === 'string' && item.trim().length > 0);
+        }
+      }
+    } catch {}
+    return [];
+  });
+
+  const saveRecentSearch = (searchTerm: string) => {
+    const trimmed = searchTerm.trim();
+    if (!trimmed) return;
+    setRecentSearches(prev => {
+      const filtered = prev.filter(q => q.toLowerCase() !== trimmed.toLowerCase());
+      const updated = [trimmed, ...filtered].slice(0, 10);
+      try {
+        localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
+
+  const removeRecentSearch = (e: React.MouseEvent, searchTerm: string) => {
+    e.stopPropagation();
+    setRecentSearches(prev => {
+      const updated = prev.filter(q => q !== searchTerm);
+      try {
+        localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
+
+  const clearAllRecentSearches = () => {
+    setRecentSearches([]);
+    try {
+      localStorage.removeItem(RECENT_SEARCHES_KEY);
+    } catch {}
+  };
 
   // Search Supabase profiles in real-time when query changes
   useEffect(() => {
@@ -167,6 +212,11 @@ export const SearchModal: React.FC<SearchModalProps> = ({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && query.trim()) {
+                saveRecentSearch(query);
+              }
+            }}
             placeholder="Search posts, challenges, communities..."
             className="flex-1 bg-transparent text-sm text-white placeholder-[#9298A3] focus:outline-none"
             autoFocus
@@ -190,24 +240,54 @@ export const SearchModal: React.FC<SearchModalProps> = ({
         {/* Results */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {!query.trim() ? (
-            <div>
-              <p className="text-xs font-semibold text-[#9298A3] mb-2 uppercase tracking-wider">
-                Trending Topics
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {['#BuildInPublic', 'TypeScript', '10K Run', 'Design Systems', 'Indie Hacking'].map(
-                  (tag) => (
-                    <button
-                      key={tag}
-                      onClick={() => setQuery(tag.replace('#', ''))}
-                      className="px-3 py-1 rounded-full text-xs bg-[#101010] hover:bg-[#20242C] border border-[#20242C] text-white/90 transition-colors"
+            recentSearches.length > 0 ? (
+              <div>
+                <div className="flex items-center justify-between mb-2.5">
+                  <p className="text-xs font-semibold text-[#8A92A6] uppercase tracking-wider flex items-center gap-1.5">
+                    <Clock size={13} className="text-[#3B82FF]" />
+                    <span>Recent Searches</span>
+                  </p>
+                  <button
+                    type="button"
+                    onClick={clearAllRecentSearches}
+                    className="text-[11px] text-[#8A92A6] hover:text-red-400 transition-colors flex items-center gap-1 cursor-pointer"
+                  >
+                    <Trash2 size={11} />
+                    <span>Clear all</span>
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {recentSearches.map((item) => (
+                    <div
+                      key={item}
+                      onClick={() => setQuery(item)}
+                      className="group flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs bg-[#10141E] hover:bg-[#1A2234] border border-[#202738] hover:border-[#2166FF]/50 text-white/90 transition-all cursor-pointer"
                     >
-                      {tag}
-                    </button>
-                  )
-                )}
+                      <Clock size={11} className="text-[#8A92A6] group-hover:text-[#3B82FF]" />
+                      <span>{item}</span>
+                      <button
+                        type="button"
+                        onClick={(e) => removeRecentSearch(e, item)}
+                        className="text-[#8A92A6] hover:text-white ml-0.5 p-0.5 rounded-full hover:bg-white/10"
+                        title="Remove search"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="py-10 text-center text-[#8A92A6] space-y-2">
+                <div className="w-10 h-10 rounded-full bg-[#121622] border border-[#202738] flex items-center justify-center mx-auto text-[#3B82FF]">
+                  <Search size={18} />
+                </div>
+                <p className="text-xs font-medium text-white/80">No recent searches</p>
+                <p className="text-[11px] text-[#8A92A6] max-w-xs mx-auto">
+                  Search for builders, challenges, squads, posts, or tags above.
+                </p>
+              </div>
+            )
           ) : (
             <>
               {/* Creators & Builders */}
@@ -234,6 +314,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                       <div
                         key={creator.id || creator.username}
                         onClick={() => {
+                          saveRecentSearch(creator.name || creator.username);
                           onNavigateAuthorProfile?.(creator);
                           onClose();
                         }}
@@ -275,6 +356,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                       <div
                         key={c.id}
                         onClick={() => {
+                          saveRecentSearch(c.name);
                           onSelectCommunity(c);
                           onClose();
                         }}
@@ -302,6 +384,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                       <div
                         key={ch.id}
                         onClick={() => {
+                          saveRecentSearch(ch.title);
                           onSelectChallenge(ch);
                           onClose();
                         }}
@@ -327,6 +410,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                       <div
                         key={p.id}
                         onClick={() => {
+                          saveRecentSearch(query || p.content.slice(0, 30));
                           onSelectPost(p);
                           onClose();
                         }}

@@ -764,23 +764,21 @@ export const INITIAL_NOTIFICATIONS: NotificationItem[] = [
 export const INITIAL_TODOS: ToDoItem[] = [
   {
     id: 'todo_1',
-    challengeId: 'ch_run5k',
-    title: 'Run 5-Kilometre Pace Route',
-    targetUnit: '5 km',
+    title: 'Review Sprint Architecture & Deploy Update',
+    targetUnit: '1 task',
     scheduledDate: new Date().toISOString().split('T')[0],
     completed: false,
-    category: 'Fitness',
-    notes: 'Morning interval run before standup',
+    category: 'Building',
+    notes: 'Clean up production logs and verify database connections',
   },
   {
     id: 'todo_2',
-    challengeId: 'ch_coding30',
-    title: 'Ship Daily Code Commit & Test Pass',
-    targetUnit: '1 commit',
+    title: 'Read 20 Pages of Distributed Systems',
+    targetUnit: '20 pages',
     scheduledDate: new Date().toISOString().split('T')[0],
     completed: true,
-    category: 'Building',
-    notes: 'Daily verified proof upload',
+    category: 'Learning',
+    notes: 'Notes taken in personal journal',
   },
 ];
 

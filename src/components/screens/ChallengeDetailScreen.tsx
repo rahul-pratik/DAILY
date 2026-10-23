@@ -29,13 +29,13 @@ interface ChallengeDetailScreenProps {
   currentUser: Author;
   onBack: () => void;
   onCheckInWithProof: (challengeId: string, note: string, photoUrl?: string, isDailyProof?: boolean) => void;
-  onAddToTodoList: (challenge: Challenge) => void;
+  onAddToTodoList?: (challenge: Challenge) => void;
   onOpenCohortChat: () => void;
   onToggleJoin?: (challengeId: string) => void;
   onRestartChallenge?: (challengeId: string) => void;
   onDeleteChallenge?: (challengeId: string) => void;
   onPostAsDailyProof?: (content: string, photoUrl?: string, challengeTitle?: string) => void;
-  isInTodoList: boolean;
+  isInTodoList?: boolean;
 }
 
 export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
@@ -49,13 +49,14 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
   onRestartChallenge,
   onDeleteChallenge,
   onPostAsDailyProof,
-  isInTodoList,
+  isInTodoList = false,
 }) => {
-  const [proofNote, setProofNote] = useState('');
   const [proofPhoto, setProofPhoto] = useState<string | null>(null);
   const [showProofForm, setShowProofForm] = useState(false);
   const [addAsDailyProof, setAddAsDailyProof] = useState(true);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showCameraPermissionModal, setShowCameraPermissionModal] = useState(false);
+  const [cameraPermissionGranted, setCameraPermissionGranted] = useState(false);
 
   // Camera states
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -153,18 +154,30 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
     e.target.value = '';
   };
 
-  const handleUseSamplePhoto = (type: 'code' | 'runner') => {
-    const url = type === 'code' 
-      ? 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=800&auto=format&fit=crop&q=80' 
-      : 'https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?w=800&auto=format&fit=crop&q=80';
-    setProofPhoto(url);
+  const handleOpenCameraWithPermission = () => {
+    if (cameraPermissionGranted) {
+      setShowProofForm(true);
+      startCamera();
+    } else {
+      setShowCameraPermissionModal(true);
+    }
+  };
+
+  const handleConfirmCameraPermission = () => {
+    setShowCameraPermissionModal(false);
+    setCameraPermissionGranted(true);
+    setShowProofForm(true);
+    startCamera();
   };
 
   const handleSubmitProof = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!proofPhoto) {
+      alert("Please take or upload a photo first to check in!");
+      return;
+    }
     stopCameraStream();
-    onCheckInWithProof(challenge.id, proofNote.trim(), proofPhoto || undefined, addAsDailyProof);
-    setProofNote('');
+    onCheckInWithProof(challenge.id, '', proofPhoto, addAsDailyProof);
     setProofPhoto(null);
     setShowProofForm(false);
   };
@@ -214,18 +227,6 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
               <Trash2 size={15} />
             </button>
           )}
-
-          <button
-            onClick={() => onAddToTodoList(challenge)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
-              isInTodoList
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                : 'bg-[#101010] hover:bg-[#1a1f29] text-white border border-[#20242C]'
-            }`}
-          >
-            {isInTodoList ? <Check size={13} /> : <Calendar size={13} className="text-[#3B82FF]" />}
-            <span>{isInTodoList ? 'In To-Do' : 'Add to To-Do'}</span>
-          </button>
         </div>
       </div>
 
@@ -410,10 +411,7 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => {
-                  setShowProofForm(true);
-                  startCamera();
-                }}
+                onClick={handleOpenCameraWithPermission}
                 className="py-2.5 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] active:scale-95 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-lg shadow-[#2166FF]/25 transition-all cursor-pointer"
               >
                 <Camera size={14} />
@@ -460,28 +458,28 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
 
       {/* Upload Photo Proof Form Drawer */}
       {showProofForm && (
-        <form onSubmit={handleSubmitProof} className="p-4 rounded-3xl bg-[#080B10] border border-[#2166FF]/40 mb-5 animate-fade-in space-y-3">
+        <form onSubmit={handleSubmitProof} className="p-4 rounded-3xl bg-[#080B10] border border-[#2166FF]/40 mb-5 animate-fade-in space-y-3.5">
           <div className="flex items-center justify-between pb-2 border-b border-[#20242C]">
             <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
               <Camera size={14} className="text-[#3B82FF]" />
-              Upload Photo Proof for Day {(challenge.current || 0) + 1}
+              Submit Photo Proof for Day {(challenge.current || 0) + 1}
             </h3>
             <button
               type="button"
-              onClick={() => setShowProofForm(false)}
+              onClick={() => {
+                stopCameraStream();
+                setShowProofForm(false);
+              }}
               className="text-[#9298A3] hover:text-white"
             >
               <X size={15} />
             </button>
           </div>
 
-          <textarea
-            value={proofNote}
-            onChange={(e) => setProofNote(e.target.value)}
-            placeholder="Add a caption or notes for today's proof (e.g. Read 28 pages, 5.2 km logged, shipped login flow)..."
-            rows={2}
-            className="w-full bg-[#101010] border border-[#20242C] rounded-xl p-2.5 text-xs text-white placeholder-[#9298A3] focus:outline-none focus:border-[#2166FF] resize-none"
-          />
+          <div className="text-[11px] text-[#8A92A6] bg-[#121622] p-2.5 rounded-xl border border-[#202738] flex items-center gap-2">
+            <CheckCircle size={14} className="text-[#3B82FF] shrink-0" />
+            <span>A verified photo is strictly required to complete today's check-in.</span>
+          </div>
 
           {/* Photo attachment preview or Camera Viewfinder */}
           {isCameraActive ? (
@@ -539,7 +537,7 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
               <div className="absolute top-2 right-2 flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={() => startCamera()}
+                  onClick={handleOpenCameraWithPermission}
                   className="px-2.5 py-1 rounded-full bg-black/80 hover:bg-black text-white text-[11px] font-medium flex items-center gap-1 cursor-pointer border border-white/20"
                   title="Retake photo"
                 >
@@ -559,7 +557,7 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
             <div className="grid grid-cols-2 gap-2">
               {/* Button 1: Open Device Camera directly */}
               <div
-                onClick={() => startCamera()}
+                onClick={handleOpenCameraWithPermission}
                 className="p-3.5 rounded-2xl bg-[#121622] hover:bg-[#1C2336] border border-[#2166FF]/40 text-center cursor-pointer transition-all group flex flex-col items-center justify-center shadow-sm"
               >
                 <div className="w-9 h-9 rounded-full bg-[#2166FF]/20 group-hover:bg-[#2166FF] flex items-center justify-center text-[#3B82FF] group-hover:text-white transition-colors mb-1.5">
@@ -577,7 +575,7 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
                 <div className="w-9 h-9 rounded-full bg-white/5 group-hover:bg-white/10 flex items-center justify-center text-[#8A92A6] group-hover:text-white transition-colors mb-1.5">
                   <ImageIcon size={18} />
                 </div>
-                <p className="text-xs font-semibold text-white">From Gallery</p>
+                <p className="text-xs font-semibold text-white">Attach Photo</p>
                 <p className="text-[10px] text-[#8A92A6]">Upload file / screenshot</p>
               </div>
             </div>
@@ -588,44 +586,6 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
               {cameraError}
             </p>
           )}
-
-          {/* Quick presets */}
-          <div className="flex items-center gap-2 text-[11px] pt-0.5">
-            <span className="text-[#9298A3]">Or sample proof:</span>
-            <button
-              type="button"
-              onClick={() => handleUseSamplePhoto('code')}
-              className="px-2 py-0.5 rounded bg-[#101010] hover:bg-[#20242C] text-[#9298A3] hover:text-white border border-[#20242C] cursor-pointer"
-            >
-              + Code Screenshot
-            </button>
-            <button
-              type="button"
-              onClick={() => handleUseSamplePhoto('runner')}
-              className="px-2 py-0.5 rounded bg-[#101010] hover:bg-[#20242C] text-[#9298A3] hover:text-white border border-[#20242C] cursor-pointer"
-            >
-              + Run GPS
-            </button>
-          </div>
-
-          {/* Feature 3: Option "Add as daily proof" */}
-          <div 
-            onClick={() => setAddAsDailyProof(!addAsDailyProof)}
-            className="flex items-center justify-between p-3 rounded-2xl bg-[#10141E] border border-[#202738] cursor-pointer hover:border-[#2166FF]/50 transition-colors"
-          >
-            <div className="flex items-center gap-2.5">
-              <div className="text-[#2166FF]">
-                {addAsDailyProof ? <CheckSquare size={17} /> : <Square size={17} className="text-[#8A92A6]" />}
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-white">Add as daily proof</p>
-                <p className="text-[10px] text-[#8A92A6]">Publishes this check-in to your public feed as proof of work</p>
-              </div>
-            </div>
-            <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-[#2166FF]/20 text-[#3B82FF]">
-              {addAsDailyProof ? 'Active' : 'Off'}
-            </span>
-          </div>
 
           <input
             type="file"
@@ -647,12 +607,53 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
 
           <button
             type="submit"
-            className="w-full py-2.5 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] active:scale-95 text-white font-semibold text-xs flex items-center justify-center gap-2 shadow-md shadow-[#2166FF]/25 transition-all cursor-pointer"
+            disabled={!proofPhoto}
+            className={`w-full py-2.5 rounded-xl font-semibold text-xs flex items-center justify-center gap-2 transition-all ${
+              proofPhoto
+                ? 'bg-[#2166FF] hover:bg-[#3B82FF] active:scale-95 text-white shadow-md shadow-[#2166FF]/25 cursor-pointer'
+                : 'bg-[#121622] text-[#8A92A6]/60 border border-[#202738] cursor-not-allowed'
+            }`}
           >
             <CheckCircle size={15} />
-            <span>Confirm & Check In {addAsDailyProof ? '(+ Post as Daily Proof)' : ''}</span>
+            <span>{proofPhoto ? 'Confirm & Check In' : 'Attach Photo to Check In'}</span>
           </button>
         </form>
+      )}
+
+      {/* Camera Permission Modal */}
+      {showCameraPermissionModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <div className="w-full max-w-sm bg-[#090C13] border border-[#2166FF]/40 rounded-3xl p-5 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-[#2166FF]/15 border border-[#2166FF]/30 flex items-center justify-center text-[#3B82FF] shrink-0">
+                <Camera size={22} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Camera Access Permission</h3>
+                <p className="text-xs text-[#8A92A6]">Daily requires camera access</p>
+              </div>
+            </div>
+            <p className="text-xs text-white/90 leading-relaxed bg-[#121622] p-3 rounded-xl border border-[#202738]">
+              To take and verify your daily challenge proof photo, Daily requests access to your device's camera.
+            </p>
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowCameraPermissionModal(false)}
+                className="flex-1 py-2.5 rounded-xl bg-[#141926] hover:bg-[#1E2433] text-xs font-semibold text-[#8A92A6] hover:text-white border border-[#202738] transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCameraPermission}
+                className="flex-1 py-2.5 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] active:scale-95 text-xs font-semibold text-white transition-all cursor-pointer shadow-md shadow-[#2166FF]/30"
+              >
+                Allow & Open Camera
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Cohort Proofs Feed (if any exists for this challenge) */}

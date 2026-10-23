@@ -11,9 +11,7 @@ import {
   ChevronDown,
   Crop,
   Sparkles,
-  Camera,
-  CheckSquare,
-  Square
+  Camera
 } from 'lucide-react';
 import { Author, PurposeLabel } from '../../types';
 import { ImageCropModal } from '../modals/ImageCropModal';
@@ -37,10 +35,11 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
 }) => {
   const [content, setContent] = useState('');
   const [selectedPurpose, setSelectedPurpose] = useState<PurposeLabel | undefined>(undefined);
-  const [isDailyProof, setIsDailyProof] = useState(false);
   const [selectedMedia, setSelectedMedia] = useState<string[]>([]);
   const [audience, setAudience] = useState<'Public' | 'Followers'>('Public');
   const [showAudienceMenu, setShowAudienceMenu] = useState(false);
+  const [showCameraPermissionModal, setShowCameraPermissionModal] = useState(false);
+  const [cameraPermissionGranted, setCameraPermissionGranted] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
@@ -100,33 +99,42 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
     setIsCropModalOpen(true);
   };
 
-  const handleAddSampleImage = (type: 'code' | 'runner') => {
-    if (selectedMedia.length >= 4) return;
-    const sample =
-      type === 'code'
-        ? 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=800&auto=format&fit=crop&q=80'
-        : 'https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?w=800&auto=format&fit=crop&q=80';
-    
-    // Open crop tool for sample image so user can pick aspect ratio
-    setImageToCrop(sample);
-    setRecropIndex(null);
-    setIsCropModalOpen(true);
-  };
-
   const handleRemoveMedia = (index: number) => {
     setSelectedMedia((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const isReadyToPost = Boolean((selectedPurpose || isDailyProof) && (content.trim() || selectedMedia.length > 0));
+  const handleRequestCameraAccess = async () => {
+    setShowCameraPermissionModal(false);
+    setCameraPermissionGranted(true);
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        // Stop stream immediately after test permission
+        stream.getTracks().forEach((track) => track.stop());
+      }
+    } catch (err) {
+      console.warn('Browser permission prompt handled:', err);
+    }
+    cameraInputRef.current?.click();
+  };
+
+  const handleCameraClick = () => {
+    if (cameraPermissionGranted) {
+      cameraInputRef.current?.click();
+    } else {
+      setShowCameraPermissionModal(true);
+    }
+  };
+
+  const isReadyToPost = Boolean(selectedPurpose && (content.trim() || selectedMedia.length > 0));
 
   const handleSubmit = () => {
     if (!isReadyToPost) return;
     onSubmitPost({
       content: content.trim(),
-      purpose: selectedPurpose || (isDailyProof ? 'Progress' : 'Insight'),
+      purpose: selectedPurpose,
       mediaUrls: selectedMedia.length > 0 ? selectedMedia : undefined,
       audience,
-      isDailyProof,
     });
   };
 
@@ -254,42 +262,6 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
         </div>
       </div>
 
-      {/* Feature 3: Option "Post as Daily Proof" */}
-      <div
-        onClick={() => {
-          const nextVal = !isDailyProof;
-          setIsDailyProof(nextVal);
-          if (nextVal && !selectedPurpose) {
-            setSelectedPurpose('Progress');
-          }
-        }}
-        className={`mb-4 p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
-          isDailyProof
-            ? 'bg-[#2166FF]/15 border-[#2166FF] shadow-sm'
-            : 'bg-[#090C13] hover:bg-[#0E121B] border-[#1C2230]'
-        }`}
-      >
-        <div className="flex items-center gap-2.5">
-          <div className="text-[#2166FF]">
-            {isDailyProof ? <CheckSquare size={17} /> : <Square size={17} className="text-[#8A92A6]" />}
-          </div>
-          <div>
-            <p className="text-xs font-semibold text-white flex items-center gap-1.5">
-              <Sparkles size={13} className="text-[#3B82FF]" />
-              <span>Post as Daily Proof</span>
-            </p>
-            <p className="text-[10px] text-[#8A92A6]">
-              Tags this post as verified daily proof of work and builds your consistency streak
-            </p>
-          </div>
-        </div>
-        <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full ${
-          isDailyProof ? 'bg-[#2166FF] text-white' : 'bg-[#121620] text-[#8A92A6]'
-        }`}>
-          {isDailyProof ? 'Active' : 'Off'}
-        </span>
-      </div>
-
       {/* Media Attachments Preview if any */}
       {selectedMedia.length > 0 && (
         <div className="mb-4">
@@ -356,24 +328,6 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
             Crop to required resolution: 1:1 Square, 4:5 Portrait, or 16:9
           </p>
         </div>
-
-        {/* Quick sample chips */}
-        <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            onClick={() => handleAddSampleImage('code')}
-            className="text-[10px] px-2 py-1 rounded bg-[#101010] hover:bg-[#20242C] text-[#9298A3] hover:text-white border border-[#20242C] transition-colors cursor-pointer"
-          >
-            + Code
-          </button>
-          <button
-            type="button"
-            onClick={() => handleAddSampleImage('runner')}
-            className="text-[10px] px-2 py-1 rounded bg-[#101010] hover:bg-[#20242C] text-[#9298A3] hover:text-white border border-[#20242C] transition-colors cursor-pointer"
-          >
-            + Run
-          </button>
-        </div>
       </div>
 
       {/* Hidden file input */}
@@ -399,7 +353,7 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
       <div className="pt-2 flex items-center gap-2 text-[#9298A3] border-t border-[#20242C]/40">
         <button
           type="button"
-          onClick={() => cameraInputRef.current?.click()}
+          onClick={handleCameraClick}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:text-white hover:bg-[#101010] bg-[#121622] text-[#3B82FF] border border-[#2166FF]/30 transition-colors cursor-pointer text-xs font-medium"
           aria-label="Take progress photo with camera"
         >
@@ -417,6 +371,42 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
           <span>Upload Image</span>
         </button>
       </div>
+
+      {/* Explicit User Camera Permission Request Modal */}
+      {showCameraPermissionModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <div className="w-full max-w-sm bg-[#090C13] border border-[#2166FF]/40 rounded-3xl p-5 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-[#2166FF]/15 border border-[#2166FF]/30 flex items-center justify-center text-[#3B82FF] shrink-0">
+                <Camera size={22} />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">Camera Access Permission</h3>
+                <p className="text-xs text-[#8A92A6]">Daily requires camera access</p>
+              </div>
+            </div>
+            <p className="text-xs text-white/90 leading-relaxed bg-[#121622] p-3 rounded-xl border border-[#202738]">
+              To capture your progress photo and attach it to your post, Daily needs permission to access your device's camera.
+            </p>
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowCameraPermissionModal(false)}
+                className="flex-1 py-2.5 rounded-xl bg-[#141926] hover:bg-[#1E2433] text-xs font-semibold text-[#8A92A6] hover:text-white border border-[#202738] transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRequestCameraAccess}
+                className="flex-1 py-2.5 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] active:scale-95 text-xs font-semibold text-white transition-all cursor-pointer shadow-md shadow-[#2166FF]/30"
+              >
+                Allow & Open
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Image Crop Modal */}
       {isCropModalOpen && (

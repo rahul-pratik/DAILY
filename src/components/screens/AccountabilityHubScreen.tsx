@@ -32,7 +32,6 @@ import {
 } from 'lucide-react';
 import { Author, Challenge, CohortProof, Community, CommunityPost, ToDoItem } from '../../types';
 import { INITIAL_COMMUNITY_WRITINGS } from '../../data/initialData';
-import { StreakAnalytics } from '../StreakAnalytics';
 
 interface AccountabilityHubScreenProps {
   currentUser: Author;
@@ -74,7 +73,14 @@ export const AccountabilityHubScreen: React.FC<AccountabilityHubScreenProps> = (
   onToggleHubPrivacy,
 }) => {
   const targetUser = hubUser || currentUser;
-  const isSelf = targetUser.username === currentUser.username;
+  const displayUsername = targetUser?.username || currentUser?.username || 'builder';
+  const displayName = targetUser?.name || currentUser?.name || 'Builder';
+  const displayAvatar = targetUser?.avatar || currentUser?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80';
+  const isSelf = Boolean(
+    (!hubUser && !targetUser) ||
+    (displayUsername && currentUser?.username && displayUsername.toLowerCase() === currentUser.username.toLowerCase()) ||
+    (targetUser?.id && currentUser?.id && targetUser.id === currentUser.id)
+  );
 
   const [activeTab, setActiveTab] = useState<'todo' | 'completed' | 'communities'>('todo');
 
@@ -115,6 +121,8 @@ export const AccountabilityHubScreen: React.FC<AccountabilityHubScreenProps> = (
   const todayStr = new Date().toISOString().split('T')[0];
   const filteredToDos = toDoList
     .filter((item) => {
+      // User request 10: challenges must not be saved to or shown in accountability hub to-do list
+      if (item.challengeId) return false;
       if (dateFilter === 'today') return item.scheduledDate === todayStr;
       if (dateFilter === 'upcoming') return item.scheduledDate >= todayStr;
       return true;
@@ -238,7 +246,7 @@ export const AccountabilityHubScreen: React.FC<AccountabilityHubScreenProps> = (
           </button>
           <div>
             <h1 className="text-base font-bold text-white truncate">
-              @{targetUser.username}'s Hub
+              @{displayUsername}'s Hub
             </h1>
             <p className="text-xs text-[#9298A3]">Accountability & Sprints</p>
           </div>
@@ -254,7 +262,7 @@ export const AccountabilityHubScreen: React.FC<AccountabilityHubScreenProps> = (
               Private Accountability Hub
             </h3>
             <p className="text-xs text-[#9298A3] leading-relaxed">
-              @{targetUser.username} has chosen to keep their daily sprints, to-do calendar, and verification proof gallery private.
+              @{displayUsername} has chosen to keep their daily sprints, to-do calendar, and verification proof gallery private.
             </p>
           </div>
           <button
@@ -282,17 +290,17 @@ export const AccountabilityHubScreen: React.FC<AccountabilityHubScreenProps> = (
           </button>
           <div className="min-w-0">
             <h1 className="text-base font-bold text-white truncate">
-              {isSelf ? 'Accountability Hub' : `@${targetUser.username}'s Hub`}
+              {isSelf ? 'Accountability Hub' : `@${displayUsername}'s Hub`}
             </h1>
             <p className="text-xs text-[#9298A3] truncate">
-              {isSelf ? 'Daily Sprints, Challenge Proofs & Hub Writings' : `Public Sprints & Verification Proofs`}
+              {isSelf ? 'Daily Sprints & Hub Writings' : `Public Sprints & Verification Proofs`}
             </p>
           </div>
         </div>
 
         <img
-          src={targetUser.avatar}
-          alt={targetUser.name}
+          src={displayAvatar}
+          alt={displayName}
           className="w-8 h-8 rounded-full object-cover border border-[#2166FF]/60 shrink-0"
           referrerPolicy="no-referrer"
         />
@@ -317,13 +325,6 @@ export const AccountabilityHubScreen: React.FC<AccountabilityHubScreenProps> = (
           </button>
         </div>
       )}
-
-      {/* Streak Analytics Component: Visualizes Daily Check-in Streaks using Bar Chart */}
-      <StreakAnalytics
-        challenges={allChallenges.length > 0 ? allChallenges : completedChallenges}
-        currentUser={targetUser}
-        onSelectChallenge={onSelectChallenge}
-      />
 
       {/* Sleek Minimal 3-Tab Navigator */}
       <div className="grid grid-cols-3 gap-1.5 p-1.5 bg-[#090C12] border border-[#1E232F] rounded-2xl mb-5 shadow-sm">
@@ -496,7 +497,7 @@ export const AccountabilityHubScreen: React.FC<AccountabilityHubScreenProps> = (
               <div className="py-12 text-center text-[#9298A3] bg-[#080B10] rounded-2xl border border-[#20242C]">
                 <Calendar size={28} className="mx-auto text-[#2166FF] mb-2 opacity-60" />
                 <p className="text-xs font-medium text-white mb-1">Your planner is clear</p>
-                <p className="text-[11px] text-[#9298A3]">Click "Add to To-Do" on any challenge to schedule your sprints!</p>
+                <p className="text-[11px] text-[#9298A3]">Click the + button above to schedule your personal sprint tasks!</p>
               </div>
             )}
           </div>

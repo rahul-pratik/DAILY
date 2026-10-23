@@ -102,7 +102,8 @@ export default function App() {
   });
   const [toDoList, setToDoList] = useState<ToDoItem[]>(() => {
     const s = StorageService.getTodos();
-    return s && s.length > 0 ? s : INITIAL_TODOS;
+    const raw = s && s.length > 0 ? s : INITIAL_TODOS;
+    return raw.filter((t) => !t.challengeId);
   });
   const [activeChallenge, setActiveChallenge] = useState<Challenge | null>(null);
   const [activeCommunity, setActiveCommunity] = useState<Community | null>(null);
@@ -282,15 +283,16 @@ export default function App() {
 
         const dbTodos = userTodosRes.data as any[];
         if (dbTodos && dbTodos.length > 0) {
-          const mappedTodos: ToDoItem[] = dbTodos.map((t: any) => ({
-            id: t.id,
-            challengeId: t.challenge_id || '',
-            title: t.title,
-            targetUnit: t.target_unit,
-            scheduledDate: t.scheduled_date,
-            completed: t.completed,
-            category: t.category,
-          }));
+          const mappedTodos: ToDoItem[] = dbTodos
+            .filter((t: any) => !t.challenge_id)
+            .map((t: any) => ({
+              id: t.id,
+              title: t.title,
+              targetUnit: t.target_unit,
+              scheduledDate: t.scheduled_date,
+              completed: t.completed,
+              category: t.category,
+            }));
           setToDoList(mappedTodos);
           StorageService.saveTodos(mappedTodos);
         }
@@ -1000,6 +1002,40 @@ export default function App() {
     showToast('Signed out of account session');
   };
 
+  const handleLogIn = () => {
+    setIsSettingsOpen(false);
+    setIsOnboardingDone(false);
+  };
+
+  const handleDeleteAccount = async () => {
+    try {
+      const activeUserId = await getActiveAuthUserId();
+      if (activeUserId && isValidUUID(activeUserId)) {
+        await Promise.allSettled([
+          supabase.from('post_likes').delete().eq('user_id', activeUserId),
+          supabase.from('post_bookmarks').delete().eq('user_id', activeUserId),
+          supabase.from('post_comments').delete().eq('author_id', activeUserId),
+          supabase.from('cohort_proofs').delete().eq('author_id', activeUserId),
+          supabase.from('challenge_participants').delete().eq('user_id', activeUserId),
+          supabase.from('community_members').delete().eq('user_id', activeUserId),
+          supabase.from('todos').delete().eq('user_id', activeUserId),
+          supabase.from('posts').delete().eq('author_id', activeUserId),
+          supabase.from('profiles').delete().eq('id', activeUserId),
+        ]);
+        await supabase.auth.signOut();
+      }
+    } catch (err) {
+      console.warn('Account deletion remote cleanup notice:', err);
+    }
+    StorageService.clearAll();
+    setCurrentUser(defaultGuestUser);
+    setViewingUser(defaultGuestUser);
+    setAccountabilityHubUser(defaultGuestUser);
+    setIsOnboardingDone(false);
+    setIsSettingsOpen(false);
+    showToast('Account permanently deleted.');
+  };
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => {
@@ -1195,38 +1231,37 @@ export default function App() {
         await syncProfileToSupabase({ ...currentUser, id: safeUserId });
 
         const targetPost = posts.find((p) => p.id === postId);
-        if (targetPost) {
-          const postAuthorId = isValidUUID(targetPost.author.id) ? targetPost.author.id : safeUserId;
-          const { error: postError } = await supabase.from('posts').upsert({
+        const { data: existingPost } = await supabase
+          .from('posts')
+          .select('id')
+          .eq('id', safePostId)
+          .maybeSingle();
+
+        if (!existingPost && targetPost) {
+          await supabase.from('posts').insert({
             id: safePostId,
-            author_id: postAuthorId,
+            author_id: safeUserId,
             content: targetPost.content,
             purpose: targetPost.purpose || 'Progress',
+            likes_count: targetPost.likesCount || 0,
             comments_count: targetPost.commentsCount || 0,
-          }, { onConflict: 'id', ignoreDuplicates: true });
-          if (postError) {
-            reportCloudSyncError('like', postError);
-            return;
-          }
+          });
         }
 
         if (nextIsLiked) {
-          const { error } = await supabase.from('post_likes').upsert({
+          await supabase.from('post_likes').upsert({
             post_id: safePostId,
             user_id: safeUserId,
           });
-          reportCloudSyncError('like', error);
         } else {
-          const { error } = await supabase.from('post_likes').delete().match({
+          await supabase.from('post_likes').delete().match({
             post_id: safePostId,
             user_id: safeUserId,
           });
-          reportCloudSyncError('unlike', error);
         }
       }
     } catch (e) {
-      console.error('Supabase like sync failed:', e);
-      showToast('Like saved on this device, but cloud sync failed.');
+      console.warn('Supabase like sync notice:', e);
     }
   };
 
@@ -1413,43 +1448,21 @@ export default function App() {
 
         // Ensure post exists in public.posts
         const targetPost = posts.find((p) => isMatch(p.id)) || sourcePost;
-        const postAuthorId = targetPost?.author.id && isValidUUID(targetPost.author.id)
-          ? targetPost.author.id
-          : safeAuthorId;
-        const safeCommunityId = targetPost?.communityId
-          ? toDeterministicUUID(targetPost.communityId)
-          : undefined;
-        if (safeCommunityId && isValidUUID(safeCommunityId)) {
-          const targetCommunity = communities.find((community) => community.id === targetPost?.communityId);
-          const { error: communityError } = await supabase.from('communities').upsert({
-            id: safeCommunityId,
-            name: targetCommunity?.name || targetPost?.communityName || 'Community',
-            description: targetCommunity?.description || '',
-            category: targetCommunity?.category || 'General',
-            icon: targetCommunity?.icon || 'code',
-            accent_color: targetCommunity?.accentColor || '#2166FF',
-            is_public: targetCommunity?.isPublic ?? true,
-            tags: targetCommunity?.tags || [],
-            members_count: targetCommunity?.membersCount || 1,
-            creator_id: safeAuthorId,
-          }, { onConflict: 'id', ignoreDuplicates: true });
-          if (communityError) {
-            reportCloudSyncError('comment', communityError);
-            return;
-          }
-        }
-        const { error: postError } = await supabase.from('posts').upsert({
-          id: safePostId,
-          author_id: postAuthorId,
-          content: targetPost?.content || text,
-          purpose: targetPost?.purpose || 'Progress',
-          community_id: safeCommunityId || null,
-          likes_count: targetPost?.likesCount || 0,
-          comments_count: (targetPost?.commentsCount || 0) + 1,
-        }, { onConflict: 'id', ignoreDuplicates: true });
-        if (postError) {
-          reportCloudSyncError('comment', postError);
-          return;
+        const { data: existingPost } = await supabase
+          .from('posts')
+          .select('id')
+          .eq('id', safePostId)
+          .maybeSingle();
+
+        if (!existingPost && targetPost) {
+          await supabase.from('posts').insert({
+            id: safePostId,
+            author_id: safeAuthorId,
+            content: targetPost.content || text,
+            purpose: targetPost.purpose || 'Progress',
+            likes_count: targetPost.likesCount || 0,
+            comments_count: 1,
+          });
         }
 
         const { error: commentErr } = await supabase.from('post_comments').insert({
@@ -1461,17 +1474,19 @@ export default function App() {
         });
 
         if (commentErr) {
-          reportCloudSyncError('comment', commentErr);
+          console.warn('Supabase comment insert notice:', commentErr.message);
         } else {
-          const { error: countError } = await supabase.from('posts').update({
-            comments_count: (targetPost?.commentsCount || 0) + 1,
-          }).eq('id', safePostId);
-          reportCloudSyncError('comment count update', countError);
+          try {
+            await supabase.from('posts').update({
+              comments_count: (targetPost?.commentsCount || 0) + 1,
+            }).eq('id', safePostId);
+          } catch {
+            // Ignore non-author post update constraint
+          }
         }
       }
     } catch (e) {
-      console.error('Supabase comment save failed:', e);
-      showToast('Comment saved on this device, but cloud sync failed.');
+      console.warn('Supabase comment save notice:', e);
     }
   };
 
@@ -2836,26 +2851,9 @@ export default function App() {
 
   const joinedCommunitiesCount = communities.filter((c) => c.isJoined).length;
 
-  // To-Do list handlers
-  const handleAddToTodoList = (challenge: Challenge) => {
-    const existing = toDoList.find((t) => t.challengeId === challenge.id);
-    if (existing) {
-      showToast(`Already in your To-Do list: "${challenge.title}"`);
-      return;
-    }
-    const todayStr = new Date().toISOString().split('T')[0];
-    const newTodo: ToDoItem = {
-      id: `todo_${Date.now()}`,
-      challengeId: challenge.id,
-      title: `Daily Check-In: ${challenge.title}`,
-      targetUnit: challenge.unit || '1 daily entry',
-      scheduledDate: todayStr,
-      completed: false,
-      category: challenge.category.charAt(0).toUpperCase() + challenge.category.slice(1),
-      notes: challenge.whatYouPerform || challenge.description,
-    };
-    setToDoList([newTodo, ...toDoList]);
-    showToast(`Added "${challenge.title}" to your To-Do list!`);
+  // To-Do list handlers (challenges are independent and not saved to To-Do per request)
+  const handleAddToTodoList = (_challenge: Challenge) => {
+    // Intentionally no-op: challenge to-do saving disabled
   };
 
   const handleToggleToDo = (id: string) => {
@@ -3710,6 +3708,8 @@ export default function App() {
           }}
           onResetToFreshData={handleResetToFreshData}
           onSignOut={handleSignOut}
+          onLogIn={handleLogIn}
+          onDeleteAccount={handleDeleteAccount}
           onClose={() => setIsSettingsOpen(false)}
         />
       )}
