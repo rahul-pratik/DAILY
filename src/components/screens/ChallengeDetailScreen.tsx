@@ -29,6 +29,7 @@ interface ChallengeDetailScreenProps {
   currentUser: Author;
   onBack: () => void;
   onCheckInWithProof: (challengeId: string, note: string, photoUrl?: string, isDailyProof?: boolean) => void;
+  onQuickCheckIn?: (challengeId: string) => void;
   onAddToTodoList?: (challenge: Challenge) => void;
   onOpenCohortChat: () => void;
   onToggleJoin?: (challengeId: string) => void;
@@ -43,6 +44,7 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
   currentUser,
   onBack,
   onCheckInWithProof,
+  onQuickCheckIn,
   onAddToTodoList,
   onOpenCohortChat,
   onToggleJoin,
@@ -51,6 +53,8 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
   onPostAsDailyProof,
   isInTodoList = false,
 }) => {
+  const [justRecorded, setJustRecorded] = useState(false);
+  const [isQuickCheckingIn, setIsQuickCheckingIn] = useState(false);
   const [proofPhoto, setProofPhoto] = useState<string | null>(null);
   const [showProofForm, setShowProofForm] = useState(false);
   const [addAsDailyProof, setAddAsDailyProof] = useState(true);
@@ -180,6 +184,24 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
     onCheckInWithProof(challenge.id, '', proofPhoto, addAsDailyProof);
     setProofPhoto(null);
     setShowProofForm(false);
+  };
+
+  // Instant Quick Check-in handler without navigating away
+  const handleQuickCheckInClick = () => {
+    if (isCompleted || isQuickCheckingIn) return;
+    setIsQuickCheckingIn(true);
+    setJustRecorded(true);
+
+    if (onQuickCheckIn) {
+      onQuickCheckIn(challenge.id);
+    } else {
+      onCheckInWithProof(challenge.id, `Completed Day ${(challenge.current || 0) + 1} quick check-in`, undefined, false);
+    }
+
+    setTimeout(() => {
+      setJustRecorded(false);
+      setIsQuickCheckingIn(false);
+    }, 2500);
   };
 
   // Cleanup camera when unmounting
@@ -722,6 +744,45 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
           <li>Photograph authentic proof: book annotations, git logs, or workout data.</li>
           <li>Support cohort members in the discussion channel to unlock squad momentum.</li>
         </ul>
+      </div>
+
+      {/* Floating Quick Check-in CTA Button */}
+      <div className="sticky bottom-4 z-30 flex justify-end pointer-events-none mt-6 pb-2">
+        <button
+          type="button"
+          onClick={handleQuickCheckInClick}
+          disabled={isCompleted || isQuickCheckingIn}
+          className={`pointer-events-auto flex items-center gap-2.5 px-4 sm:px-5 py-3 rounded-2xl font-bold text-xs tracking-wide shadow-2xl backdrop-blur-md transition-all active:scale-95 cursor-pointer border ${
+            isCompleted
+              ? 'bg-[#10141E]/95 text-emerald-400 border-emerald-500/30 shadow-none cursor-default'
+              : justRecorded
+              ? 'bg-emerald-600 text-white border-emerald-400 shadow-emerald-500/30 ring-2 ring-emerald-400/50'
+              : 'bg-[#2166FF] hover:bg-[#3B82FF] text-white border-[#3B82FF]/40 shadow-lg shadow-[#2166FF]/40 hover:shadow-xl hover:shadow-[#2166FF]/50 ring-1 ring-white/20'
+          }`}
+          aria-label="Quick Check-in"
+        >
+          {isCompleted ? (
+            <>
+              <CheckCircle size={16} className="text-emerald-400 shrink-0" />
+              <span>Challenge Completed</span>
+            </>
+          ) : justRecorded ? (
+            <>
+              <Check size={16} className="stroke-[3] text-white shrink-0 animate-scale-in" />
+              <span>Day {challenge.current} Recorded!</span>
+            </>
+          ) : (
+            <>
+              <Flame size={16} className="text-amber-300 fill-amber-300 shrink-0 animate-pulse" />
+              <div className="flex flex-col text-left leading-tight">
+                <span className="font-extrabold text-xs">Quick Check-in</span>
+                <span className="text-[10px] text-white/80 font-mono font-normal">
+                  {challenge.joined ? `Log Day ${(challenge.current || 0) + 1}` : 'Start & Log Day 1'}
+                </span>
+              </div>
+            </>
+          )}
+        </button>
       </div>
     </div>
   );

@@ -1858,6 +1858,21 @@ export default function App() {
         const newCurrent = Math.min(prev.target, prev.current + 1);
         return {
           ...prev,
+          joined: true,
+          current: newCurrent,
+          status: newCurrent >= prev.target ? 'completed' : 'active',
+        };
+      }
+      return prev;
+    });
+
+    // Keep activeChallenge in sync so ChallengeDetailScreen updates immediately
+    setActiveChallenge((prev) => {
+      if (prev && prev.id === challengeId) {
+        const newCurrent = Math.min(prev.target, prev.current + 1);
+        return {
+          ...prev,
+          joined: true,
           current: newCurrent,
           status: newCurrent >= prev.target ? 'completed' : 'active',
         };
@@ -3355,7 +3370,7 @@ export default function App() {
         );
       }
       case 'challenge_detail': {
-        const targetCh = activeChallenge || challenges[0];
+        const targetCh = (activeChallenge ? challenges.find((c) => c.id === activeChallenge.id) || activeChallenge : challenges[0]);
         if (!targetCh) {
           return (
             <div className="py-20 text-center px-4">
@@ -3375,6 +3390,7 @@ export default function App() {
             currentUser={currentUser}
             onBack={() => handleSelectScreen(previousScreen === 'challenge_detail' ? 'challenges' : previousScreen)}
             onCheckInWithProof={handleCheckInWithProof}
+            onQuickCheckIn={handleIncrementChallenge}
             onAddToTodoList={handleAddToTodoList}
             onOpenCohortChat={() => handleOpenCohortDiscussions(targetCh)}
             onToggleJoin={handleToggleJoinChallenge}
