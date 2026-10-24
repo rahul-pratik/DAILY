@@ -17,7 +17,8 @@ import {
   ChevronDown,
   ArrowRight,
   Lock,
-  Clock
+  Clock,
+  X
 } from 'lucide-react';
 import { Author, Community } from '../../types';
 
@@ -78,10 +79,13 @@ export const CommunitiesScreen: React.FC<CommunitiesScreenProps> = ({
     }
 
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
+      const q = searchQuery.toLowerCase().trim().replace(/^#/, '');
       const match = item.name.toLowerCase().includes(q) ||
+        (item.tags && item.tags.some(t => t.toLowerCase().replace(/^#/, '').includes(q))) ||
+        item.category.toLowerCase().includes(q) ||
         item.description.toLowerCase().includes(q) ||
-        item.creator?.username.toLowerCase().includes(q);
+        (item.creator?.username && item.creator.username.toLowerCase().includes(q)) ||
+        (item.creator?.name && item.creator.name.toLowerCase().includes(q));
       if (!match) return false;
     }
 
@@ -129,6 +133,28 @@ export const CommunitiesScreen: React.FC<CommunitiesScreenProps> = ({
           <Plus size={14} className="stroke-[2.5]" />
           <span>New Community</span>
         </button>
+      </div>
+
+      {/* Communities Screen Header Search Bar */}
+      <div className="relative mb-3.5">
+        <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#9298A3]" />
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search communities by title, #tag, or category..."
+          className="w-full bg-[#080B10] border border-[#20242C] rounded-xl pl-9 pr-9 py-2 text-xs text-white placeholder-[#9298A3] focus:outline-none focus:border-[#2166FF] transition-colors"
+        />
+        {searchQuery && (
+          <button
+            type="button"
+            onClick={() => setSearchQuery('')}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-[#9298A3] hover:text-white transition-colors cursor-pointer"
+            aria-label="Clear search"
+          >
+            <X size={13} />
+          </button>
+        )}
       </div>
 
       {/* Access Filter & Topic Pills Row */}
@@ -384,15 +410,29 @@ export const CommunitiesScreen: React.FC<CommunitiesScreenProps> = ({
             <Compass size={28} className="mx-auto text-[#2166FF] mb-1 opacity-70" />
             <div>
               <p className="text-sm font-semibold text-white mb-0.5">No communities found</p>
-              <p className="text-xs text-[#9298A3]">Try selecting another topic filter or create your own hub.</p>
+              <p className="text-xs text-[#9298A3]">
+                {searchQuery
+                  ? `No communities matching "${searchQuery}".`
+                  : 'Try selecting another topic filter or create your own hub.'}
+              </p>
             </div>
-            <button
-              type="button"
-              onClick={onOpenCreateCommunity}
-              className="px-4 py-2 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] text-white text-xs font-semibold cursor-pointer shadow-md transition-colors"
-            >
-              Create Community
-            </button>
+            {searchQuery ? (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="px-4 py-2 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] text-white text-xs font-semibold cursor-pointer shadow-md transition-colors"
+              >
+                Clear Search
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onOpenCreateCommunity}
+                className="px-4 py-2 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] text-white text-xs font-semibold cursor-pointer shadow-md transition-colors"
+              >
+                Create Community
+              </button>
+            )}
           </div>
         )}
       </div>

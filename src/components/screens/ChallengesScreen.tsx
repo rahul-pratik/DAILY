@@ -187,11 +187,14 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
     }
 
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
+      const q = searchQuery.toLowerCase().trim().replace(/^#/, '');
       const match = ch.title.toLowerCase().includes(q) ||
+        (ch.tags && ch.tags.some(t => t.toLowerCase().replace(/^#/, '').includes(q))) ||
+        ch.category.toLowerCase().includes(q) ||
         ch.description.toLowerCase().includes(q) ||
         (ch.whatYouPerform && ch.whatYouPerform.toLowerCase().includes(q)) ||
-        (ch.creator?.name.toLowerCase().includes(q));
+        (ch.creator?.name && ch.creator.name.toLowerCase().includes(q)) ||
+        (ch.creator?.username && ch.creator.username.toLowerCase().includes(q));
       if (!match) return false;
     }
 
@@ -276,7 +279,7 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
   return (
     <div className="pb-24 pt-2 px-3 sm:px-4 animate-fade-in max-w-2xl mx-auto">
       {/* Minimal Header */}
-      <div className="flex items-center justify-between mb-4 pt-1">
+      <div className="flex items-center justify-between mb-3 pt-1">
         <div>
           <h1 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
             <Trophy size={19} className="text-[#2166FF]" />
@@ -294,6 +297,33 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
           <Plus size={14} className="stroke-[2.5]" />
           <span>New Challenge</span>
         </button>
+      </div>
+
+      {/* Header Search Bar for Quick Challenge & Tag Discovery */}
+      <div className="relative mb-3.5">
+        <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#8A92A6]" />
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => {
+            setSearchQuery(e.target.value);
+            if (e.target.value.trim() && viewMode !== 'challenges') {
+              setViewMode('challenges');
+            }
+          }}
+          placeholder="Search challenges by title, #tag, or category..."
+          className="w-full bg-[#090C13] border border-[#1C2230] rounded-xl pl-9 pr-9 py-2 text-xs text-white placeholder-[#8A92A6] focus:outline-none focus:border-[#2166FF] transition-colors"
+        />
+        {searchQuery && (
+          <button
+            type="button"
+            onClick={() => setSearchQuery('')}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-[#8A92A6] hover:text-white transition-colors cursor-pointer"
+            aria-label="Clear search"
+          >
+            <X size={13} />
+          </button>
+        )}
       </div>
 
       {/* Sleek Minimalist 3-Tab Navigator: Challenges, Squad Status, Manage Squads */}
@@ -930,17 +960,7 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
             <ChevronRight size={17} className="text-[#8A92A6] group-hover:text-white shrink-0 transition-colors" />
           </div>
 
-          {/* Minimal Search Bar */}
-          <div className="relative">
-            <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#8A92A6]" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search challenges by goal, topic, creator..."
-              className="w-full bg-[#090C13] border border-[#1C2230] rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-[#8A92A6] focus:outline-none focus:border-[#2166FF] transition-colors"
-            />
-          </div>
+
 
           {/* Segmented Filter Pills */}
           <div className="flex items-center justify-between gap-2 overflow-x-auto no-scrollbar pb-0.5">
@@ -1157,18 +1177,30 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                 <div>
                   <p className="text-sm font-semibold text-white mb-0.5">No challenges found</p>
                   <p className="text-xs text-[#8A92A6]">
-                    {selectedTag !== '#All Tags' 
-                      ? `No challenges tagged under ${selectedTag}.` 
+                    {searchQuery
+                      ? `No challenges matching "${searchQuery}".`
+                      : selectedTag !== '#All Tags'
+                      ? `No challenges tagged under ${selectedTag}.`
                       : 'Be the first to launch a new challenge!'}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={onOpenCreateChallenge}
-                  className="px-4 py-2 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] text-white text-xs font-semibold cursor-pointer shadow-md transition-colors"
-                >
-                  Create New Challenge
-                </button>
+                {searchQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="px-4 py-2 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] text-white text-xs font-semibold cursor-pointer shadow-md transition-colors"
+                  >
+                    Clear Search
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onOpenCreateChallenge}
+                    className="px-4 py-2 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] text-white text-xs font-semibold cursor-pointer shadow-md transition-colors"
+                  >
+                    Create New Challenge
+                  </button>
+                )}
               </div>
             )}
           </div>
