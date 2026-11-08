@@ -1497,6 +1497,9 @@ export default function App() {
     mediaUrls?: string[];
     audience?: string;
     isDailyProof?: boolean;
+    communityId?: string;
+    communityName?: string;
+    challengeTitle?: string;
   }) => {
     const postId = getSafeUUID();
 
@@ -1525,6 +1528,9 @@ export default function App() {
       content: data.content,
       mediaUrls: processedMedia,
       isDailyProof: data.isDailyProof,
+      communityId: data.communityId,
+      communityName: data.communityName,
+      challengeTitle: data.challengeTitle,
       likesCount: 0,
       commentsCount: 0,
       isLiked: false,
@@ -3240,6 +3246,8 @@ export default function App() {
         return (
           <CreatePostScreen
             currentUser={currentUser}
+            communities={communities}
+            challenges={challenges}
             onClose={handleCloseCreate}
             onSubmitPost={handleCreatePost}
           />

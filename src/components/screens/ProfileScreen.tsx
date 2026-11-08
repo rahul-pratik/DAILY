@@ -27,6 +27,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { Author, Challenge, Community, Post } from '../../types';
+import { CreditIcon, isCommunityOrChallengePost } from '../CreditIcon';
 
 interface ProfileScreenProps {
   user: Author;
@@ -94,9 +95,18 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   );
   const savedPosts = posts.filter((p) => p.isSaved);
 
-  // Total likes accumulated over each post written by this user
-  const totalLikesAccumulated = React.useMemo(() => {
-    return userPosts.reduce((acc, p) => acc + (p.likesCount || 0), 0);
+  // Total likes and credits accumulated over each post written by this user
+  const { totalLikesAccumulated, totalCreditsAccumulated } = React.useMemo(() => {
+    let likes = 0;
+    let credits = 0;
+    userPosts.forEach((p) => {
+      if (isCommunityOrChallengePost(p)) {
+        credits += (p.likesCount || 0);
+      } else {
+        likes += (p.likesCount || 0);
+      }
+    });
+    return { totalLikesAccumulated: likes, totalCreditsAccumulated: credits };
   }, [userPosts]);
 
   // Filter following users for this profile
@@ -428,21 +438,27 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             </span>
           </button>
 
-          {/* 4. Total Likes Accumulated Over Each Post */}
+          {/* 4. Total Likes & Credits Accumulated Over Each Post */}
           <button 
             type="button"
             onClick={() => setActiveTab('posts')}
             className="flex flex-col items-center justify-center py-1 px-1 rounded-xl hover:bg-[#101010] transition-all cursor-pointer group"
-            title="Total Likes accumulated over each post"
+            title="Likes & Credits accumulated over each post"
           >
-            <span className="text-base sm:text-lg font-bold text-rose-400 group-hover:text-white transition-colors tabular-nums font-mono flex items-center justify-center gap-1">
-              <Heart size={13} className="fill-rose-500 text-rose-500 shrink-0" />
-              <span>{totalLikesAccumulated}</span>
-            </span>
+            <div className="flex items-center justify-center gap-1.5 flex-wrap">
+              <span className="text-sm sm:text-base font-bold text-rose-400 tabular-nums font-mono flex items-center gap-0.5" title="Likes">
+                <Heart size={11} className="fill-rose-500 text-rose-500 shrink-0" />
+                <span>{totalLikesAccumulated}</span>
+              </span>
+              <span className="text-sm sm:text-base font-bold text-[#3B82FF] tabular-nums font-mono flex items-center gap-0.5" title="Credits">
+                <CreditIcon size={13} credited className="text-[#3B82FF] shrink-0" />
+                <span>{totalCreditsAccumulated}</span>
+              </span>
+            </div>
             <span className="text-[10px] text-[#9298A3] group-hover:text-white transition-colors truncate max-w-full font-medium">
-              Total Likes
+              Likes & Credits
             </span>
-            <span className="text-[9px] text-rose-400 font-mono">
+            <span className="text-[9px] text-[#3B82FF] font-mono">
               Accumulated
             </span>
           </button>
@@ -531,10 +547,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
                 <div className="flex items-center justify-between text-xs text-[#9298A3] font-mono pt-2 border-t border-[#20242C]/50">
                   <div className="flex items-center gap-4">
-                    <span className="flex items-center gap-1.5 hover:text-white transition-colors">
-                      <Heart size={14} className={post.isLiked ? 'fill-red-500 text-red-500' : ''} />
-                      <span>{post.likesCount}</span>
-                    </span>
+                    {isCommunityOrChallengePost(post) ? (
+                      <span className="flex items-center gap-1.5 text-[#3B82FF] transition-colors" title="Credits">
+                        <CreditIcon size={14} credited={post.isLiked} className={post.isLiked ? 'text-[#2166FF]' : 'text-[#9298A3]'} />
+                        <span className="font-semibold">{post.likesCount} credits</span>
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1.5 hover:text-white transition-colors" title="Likes">
+                        <Heart size={14} className={post.isLiked ? 'fill-red-500 text-red-500' : ''} />
+                        <span>{post.likesCount}</span>
+                      </span>
+                    )}
                     <span className="flex items-center gap-1.5 hover:text-white transition-colors">
                       <MessageSquare size={14} />
                       <span>{post.commentsCount}</span>
@@ -626,10 +649,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
                 <div className="flex items-center justify-between text-xs text-[#9298A3] font-mono pt-2 border-t border-[#20242C]/50">
                   <div className="flex items-center gap-4">
-                    <span className="flex items-center gap-1.5 hover:text-white transition-colors">
-                      <Heart size={14} className={post.isLiked ? 'fill-red-500 text-red-500' : ''} />
-                      <span>{post.likesCount}</span>
-                    </span>
+                    {isCommunityOrChallengePost(post) ? (
+                      <span className="flex items-center gap-1.5 text-[#3B82FF] transition-colors" title="Credits">
+                        <CreditIcon size={14} credited={post.isLiked} className={post.isLiked ? 'text-[#2166FF]' : 'text-[#9298A3]'} />
+                        <span className="font-semibold">{post.likesCount} credits</span>
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1.5 hover:text-white transition-colors" title="Likes">
+                        <Heart size={14} className={post.isLiked ? 'fill-red-500 text-red-500' : ''} />
+                        <span>{post.likesCount}</span>
+                      </span>
+                    )}
                     <span className="flex items-center gap-1.5 hover:text-white transition-colors">
                       <MessageSquare size={14} />
                       <span>{post.commentsCount}</span>

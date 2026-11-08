@@ -13,11 +13,14 @@ import {
   Sparkles,
   Camera
 } from 'lucide-react';
-import { Author, PurposeLabel } from '../../types';
+import { Author, Challenge, Community, PurposeLabel } from '../../types';
 import { ImageCropModal } from '../modals/ImageCropModal';
+import { CreditIcon } from '../CreditIcon';
 
 interface CreatePostScreenProps {
   currentUser: Author;
+  communities?: Community[];
+  challenges?: Challenge[];
   onClose: () => void;
   onSubmitPost: (data: {
     content: string;
@@ -25,11 +28,16 @@ interface CreatePostScreenProps {
     mediaUrls?: string[];
     audience?: string;
     isDailyProof?: boolean;
+    communityId?: string;
+    communityName?: string;
+    challengeTitle?: string;
   }) => void;
 }
 
 export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
   currentUser,
+  communities = [],
+  challenges = [],
   onClose,
   onSubmitPost,
 }) => {
@@ -38,6 +46,12 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
   const [selectedMedia, setSelectedMedia] = useState<string[]>([]);
   const [audience, setAudience] = useState<'Public' | 'Followers'>('Public');
   const [showAudienceMenu, setShowAudienceMenu] = useState(false);
+  const [selectedDestination, setSelectedDestination] = useState<{
+    type: 'general' | 'community' | 'challenge';
+    id?: string;
+    name?: string;
+  }>({ type: 'general' });
+  const [showDestinationMenu, setShowDestinationMenu] = useState(false);
   const [showCameraPermissionModal, setShowCameraPermissionModal] = useState(false);
   const [cameraPermissionGranted, setCameraPermissionGranted] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -135,6 +149,9 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
       purpose: selectedPurpose,
       mediaUrls: selectedMedia.length > 0 ? selectedMedia : undefined,
       audience,
+      communityId: selectedDestination.type === 'community' ? selectedDestination.id : undefined,
+      communityName: selectedDestination.type === 'community' ? selectedDestination.name : undefined,
+      challengeTitle: selectedDestination.type === 'challenge' ? selectedDestination.name : undefined,
     });
   };
 
@@ -163,17 +180,19 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
         </button>
       </div>
 
-      {/* User & Audience Selector */}
-      <div className="flex items-center gap-3 mb-4">
+      {/* User, Audience & Destination Selector */}
+      <div className="flex items-center gap-2.5 mb-4 flex-wrap">
         <img
           src={currentUser.avatar}
           alt={currentUser.name}
-          className="w-10 h-10 rounded-full object-cover border border-[#2166FF]/60"
+          className="w-10 h-10 rounded-full object-cover border border-[#2166FF]/60 shrink-0"
           referrerPolicy="no-referrer"
         />
 
+        {/* Audience */}
         <div className="relative">
           <button
+            type="button"
             onClick={() => setShowAudienceMenu(!showAudienceMenu)}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#080B10] hover:bg-[#101010] border border-[#20242C] text-xs font-medium text-white transition-colors cursor-pointer"
           >
@@ -185,6 +204,7 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
           {showAudienceMenu && (
             <div className="absolute left-0 top-full mt-1.5 w-44 rounded-xl bg-[#080B10] border border-[#20242C] shadow-2xl py-1 z-50">
               <button
+                type="button"
                 onClick={() => {
                   setAudience('Public');
                   setShowAudienceMenu(false);
@@ -196,6 +216,7 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
                 Public (Everyone)
               </button>
               <button
+                type="button"
                 onClick={() => {
                   setAudience('Followers');
                   setShowAudienceMenu(false);
@@ -206,6 +227,115 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
               >
                 Followers Only
               </button>
+            </div>
+          )}
+        </div>
+
+        {/* Post Destination: Normal (Likes) vs Community (Credits) vs Challenge (Credits) */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setShowDestinationMenu(!showDestinationMenu)}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#080B10] hover:bg-[#101010] border border-[#20242C] text-xs font-medium text-white transition-colors cursor-pointer"
+          >
+            {selectedDestination.type === 'general' ? (
+              <>
+                <Heart size={12} className="text-rose-400 fill-rose-500 shrink-0" />
+                <span>General Post (Likes)</span>
+              </>
+            ) : selectedDestination.type === 'community' ? (
+              <>
+                <CreditIcon size={13} credited className="text-[#3B82FF] shrink-0" />
+                <span className="truncate max-w-[120px]">{selectedDestination.name}</span>
+                <span className="text-[10px] text-[#3B82FF] font-mono">(Credits)</span>
+              </>
+            ) : (
+              <>
+                <CreditIcon size={13} credited className="text-amber-400 shrink-0" />
+                <span className="truncate max-w-[120px]">{selectedDestination.name}</span>
+                <span className="text-[10px] text-amber-400 font-mono">(Credits)</span>
+              </>
+            )}
+            <ChevronDown size={14} className="text-[#9298A3]" />
+          </button>
+
+          {showDestinationMenu && (
+            <div className="absolute left-0 top-full mt-1.5 w-64 rounded-2xl bg-[#080B10] border border-[#20242C] shadow-2xl p-2 z-50 space-y-1 max-h-64 overflow-y-auto">
+              <div className="px-2 py-1 text-[10px] font-bold text-[#8A92A6] uppercase tracking-wider">
+                Post Destination
+              </div>
+
+              {/* General / Normal Post Option */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedDestination({ type: 'general' });
+                  setShowDestinationMenu(false);
+                }}
+                className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs transition-colors cursor-pointer flex items-center justify-between ${
+                  selectedDestination.type === 'general' ? 'bg-[#2166FF]/20 text-white font-semibold' : 'text-white hover:bg-[#121620]'
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <Heart size={13} className="text-rose-400 fill-rose-500 shrink-0" />
+                  <span>General Feed (Normal)</span>
+                </span>
+                <span className="text-[10px] text-rose-400 font-mono">♥ Likes</span>
+              </button>
+
+              {/* Communities List */}
+              {communities && communities.length > 0 && (
+                <>
+                  <div className="px-2 pt-2 pb-0.5 text-[10px] font-bold text-[#3B82FF] uppercase tracking-wider">
+                    Under Communities
+                  </div>
+                  {communities.map((comm) => (
+                    <button
+                      key={comm.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedDestination({ type: 'community', id: comm.id, name: comm.name });
+                        setShowDestinationMenu(false);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs transition-colors cursor-pointer flex items-center justify-between ${
+                        selectedDestination.type === 'community' && selectedDestination.id === comm.id
+                          ? 'bg-[#2166FF]/20 text-white font-semibold'
+                          : 'text-white hover:bg-[#121620]'
+                      }`}
+                    >
+                      <span className="truncate pr-2">{comm.name}</span>
+                      <span className="text-[10px] text-[#3B82FF] font-mono shrink-0">C Credits</span>
+                    </button>
+                  ))}
+                </>
+              )}
+
+              {/* Challenges List */}
+              {challenges && challenges.length > 0 && (
+                <>
+                  <div className="px-2 pt-2 pb-0.5 text-[10px] font-bold text-amber-400 uppercase tracking-wider">
+                    Under Challenges
+                  </div>
+                  {challenges.map((ch) => (
+                    <button
+                      key={ch.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedDestination({ type: 'challenge', id: ch.id, name: ch.title });
+                        setShowDestinationMenu(false);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs transition-colors cursor-pointer flex items-center justify-between ${
+                        selectedDestination.type === 'challenge' && selectedDestination.id === ch.id
+                          ? 'bg-[#2166FF]/20 text-white font-semibold'
+                          : 'text-white hover:bg-[#121620]'
+                      }`}
+                    >
+                      <span className="truncate pr-2">{ch.title}</span>
+                      <span className="text-[10px] text-amber-400 font-mono shrink-0">C Credits</span>
+                    </button>
+                  ))}
+                </>
+              )}
             </div>
           )}
         </div>

@@ -12,6 +12,7 @@ import {
   Loader2
 } from 'lucide-react';
 import { Author, Post } from '../../types';
+import { CreditIcon, isCommunityOrChallengePost } from '../CreditIcon';
 
 interface HomeScreenProps {
   posts: Post[];
@@ -366,10 +367,22 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                         <span className="text-[#3B82FF] font-medium">{post.purpose}</span>
                       </>
                     )}
+                    {post.communityName && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className="text-cyan-400 font-medium truncate max-w-[150px]">in {post.communityName}</span>
+                      </>
+                    )}
+                    {post.challengeTitle && !post.isDailyProof && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className="text-amber-400 font-medium truncate max-w-[150px]">for {post.challengeTitle}</span>
+                      </>
+                    )}
                     {post.isDailyProof && (
                       <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-semibold text-[10px]">
                         <Sparkles size={9} />
-                        <span>Daily Proof{post.proofDay ? ` • Day ${post.proofDay}` : ''}</span>
+                        <span>Daily Proof{post.proofDay ? ` • Day ${post.proofDay}` : ''}{post.challengeTitle ? ` (${post.challengeTitle})` : ''}</span>
                       </span>
                     )}
                   </div>
@@ -466,26 +479,53 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             )}
 
             {/* Post Engagement Action Bar */}
-            <div className="flex items-center justify-between text-[#9298A3] pt-1">
-              <div className="flex items-center gap-6">
-                {/* Like Button */}
-                <button
-                  onClick={() => onToggleLike(post.id)}
-                  className={`flex items-center gap-1.5 text-xs font-medium transition-colors cursor-pointer group ${
-                    post.isLiked ? 'text-[#2166FF]' : 'hover:text-white'
-                  }`}
-                  aria-label="Like post"
-                >
-                  <Heart
-                    size={18}
-                    className={`transition-transform active:scale-125 ${
-                      post.isLiked
-                        ? 'fill-[#2166FF] text-[#2166FF]'
-                        : 'text-[#9298A3] group-hover:text-white'
-                    }`}
-                  />
-                  <span className="tabular-nums font-mono">{post.likesCount}</span>
-                </button>
+            {(() => {
+              const isCredited = isCommunityOrChallengePost(post);
+              return (
+                <div className="flex items-center justify-between text-[#9298A3] pt-1">
+                  <div className="flex items-center gap-6">
+                    {/* Like / Credits Button */}
+                    {isCredited ? (
+                      <button
+                        onClick={() => onToggleLike(post.id)}
+                        className={`flex items-center gap-1.5 text-xs font-medium transition-colors cursor-pointer group ${
+                          post.isLiked ? 'text-[#2166FF]' : 'hover:text-white'
+                        }`}
+                        aria-label={post.isLiked ? 'Remove credit' : 'Give credit'}
+                        title={post.isLiked ? 'Credited' : 'Give credit (C)'}
+                      >
+                        <CreditIcon
+                          size={18}
+                          credited={post.isLiked}
+                          className={
+                            post.isLiked
+                              ? 'text-[#2166FF]'
+                              : 'text-[#9298A3] group-hover:text-white'
+                          }
+                        />
+                        <span className="tabular-nums font-mono font-semibold">{post.likesCount}</span>
+                        <span className="text-[10px] text-[#8A92A6]">credits</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => onToggleLike(post.id)}
+                        className={`flex items-center gap-1.5 text-xs font-medium transition-colors cursor-pointer group ${
+                          post.isLiked ? 'text-[#2166FF]' : 'hover:text-white'
+                        }`}
+                        aria-label="Like post"
+                        title={post.isLiked ? 'Liked' : 'Like'}
+                      >
+                        <Heart
+                          size={18}
+                          className={`transition-transform active:scale-125 ${
+                            post.isLiked
+                              ? 'fill-[#2166FF] text-[#2166FF]'
+                              : 'text-[#9298A3] group-hover:text-white'
+                          }`}
+                        />
+                        <span className="tabular-nums font-mono">{post.likesCount}</span>
+                      </button>
+                    )}
 
                 {/* Comment Button */}
                 <button
@@ -527,7 +567,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 </button>
               </div>
             </div>
-          </article>
+          );
+        })()}
+      </article>
         ))}
 
         {filteredPosts.length === 0 && (

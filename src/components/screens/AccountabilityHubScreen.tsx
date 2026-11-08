@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { Author, Challenge, CohortProof, Community, CommunityPost, ToDoItem } from '../../types';
 import { INITIAL_COMMUNITY_WRITINGS } from '../../data/initialData';
+import { CreditIcon } from '../CreditIcon';
 
 interface AccountabilityHubScreenProps {
   currentUser: Author;
@@ -984,9 +985,10 @@ export const AccountabilityHubScreen: React.FC<AccountabilityHubScreenProps> = (
                                 ? 'bg-[#2166FF]/20 text-[#3B82FF] border border-[#2166FF]/40'
                                 : 'bg-[#101010] text-[#9298A3] hover:text-white border border-[#20242C]'
                             }`}
+                            title="Credit this community post"
                           >
-                            <ThumbsUp size={12} className={post.userVote === 'up' ? 'fill-[#3B82FF]' : ''} />
-                            <span>{post.upvotes}</span>
+                            <CreditIcon size={14} credited={post.userVote === 'up'} />
+                            <span>{post.upvotes} credits</span>
                           </button>
 
                           <div className="flex items-center gap-1 text-[#9298A3] font-mono text-[11px]">

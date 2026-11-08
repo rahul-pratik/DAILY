@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { Author, Challenge, CohortProof } from '../../types';
 import { getSafeUUID } from '../../lib/supabase';
+import { CreditIcon } from '../CreditIcon';
 
 interface CohortDiscussionsScreenProps {
   challenge: Challenge;
@@ -789,12 +790,19 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
               <button
                 type="button"
                 onClick={() => handleToggleLikeProof(proof.id)}
-                className={`flex items-center gap-1.5 transition-colors cursor-pointer ${
+                className={`flex items-center gap-1.5 transition-colors cursor-pointer group ${
                   proof.isLiked ? 'text-[#2166FF]' : 'hover:text-white'
                 }`}
+                aria-label={proof.isLiked ? 'Remove credit' : 'Give credit'}
+                title={proof.isLiked ? 'Credited' : 'Give credit (C)'}
               >
-                <Heart size={14} className={proof.isLiked ? 'fill-[#2166FF]' : ''} />
-                <span className="font-mono tabular-nums">{proof.likesCount}</span>
+                <CreditIcon
+                  size={15}
+                  credited={proof.isLiked}
+                  className={proof.isLiked ? 'text-[#2166FF]' : 'text-[#9298A3] group-hover:text-white'}
+                />
+                <span className="font-mono tabular-nums font-semibold">{proof.likesCount}</span>
+                <span className="text-[10px] text-[#8A92A6]">credits</span>
               </button>
 
               <span className="text-[11px] text-[#9298A3] font-mono">

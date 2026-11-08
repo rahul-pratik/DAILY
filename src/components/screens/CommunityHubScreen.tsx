@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { Author, Community, CommunityPost, Post } from '../../types';
 import { CommunityModeratorModal } from '../modals/CommunityModeratorModal';
+import { CreditIcon } from '../CreditIcon';
 import { getSafeUUID, toDeterministicUUID } from '../../lib/supabase';
 
 interface CommunityHubScreenProps {
@@ -539,31 +540,27 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
               key={post.id}
               className="p-4 rounded-3xl bg-[#080B10] border border-[#20242C] transition-all flex gap-3.5 group"
             >
-              {/* Left Upvote/Downvote Column */}
-              <div className="flex flex-col items-center justify-start bg-[#101010]/80 border border-[#20242C] rounded-2xl p-1.5 shrink-0 self-start">
+              {/* Left Credits Column */}
+              <div className="flex flex-col items-center justify-center bg-[#101010]/80 border border-[#20242C] rounded-2xl p-2 shrink-0 self-start min-w-[50px]">
                 <button
                   onClick={() => handleVote(post.id, 'up')}
-                  className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer ${
-                    post.userVote === 'up' ? 'text-[#2166FF] bg-[#2166FF]/10' : 'text-[#9298A3] hover:text-white'
+                  className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all cursor-pointer ${
+                    post.userVote === 'up'
+                      ? 'text-[#2166FF] bg-[#2166FF]/15 border border-[#2166FF]/35 shadow-sm shadow-[#2166FF]/25'
+                      : 'text-[#9298A3] hover:text-white hover:bg-[#1a1f29] border border-transparent'
                   }`}
-                  aria-label="Upvote"
+                  aria-label={post.userVote === 'up' ? 'Remove credit' : 'Give credit'}
+                  title={post.userVote === 'up' ? 'Credited' : 'Give credit (C)'}
                 >
-                  <ChevronUp size={18} />
+                  <CreditIcon size={18} credited={post.userVote === 'up'} />
                 </button>
 
-                <span className="text-xs font-bold font-mono tabular-nums text-white my-1">
+                <span className="text-xs font-bold font-mono tabular-nums text-white mt-1">
                   {post.upvotes}
                 </span>
-
-                <button
-                  onClick={() => handleVote(post.id, 'down')}
-                  className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors cursor-pointer ${
-                    post.userVote === 'down' ? 'text-red-400 bg-red-500/10' : 'text-[#9298A3] hover:text-white'
-                  }`}
-                  aria-label="Downvote"
-                >
-                  <ChevronDown size={18} />
-                </button>
+                <span className="text-[9px] font-semibold text-[#8A92A6] uppercase tracking-wider">
+                  Credits
+                </span>
               </div>
 
               {/* Main Card Content */}
