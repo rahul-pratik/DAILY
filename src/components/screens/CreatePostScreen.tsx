@@ -240,14 +240,14 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
           >
             {selectedDestination.type === 'general' ? (
               <>
-                <Heart size={12} className="text-rose-400 fill-rose-500 shrink-0" />
-                <span>General Post (Likes)</span>
+                <CreditIcon size={13} credited className="text-[#3B82FF] shrink-0" />
+                <span>General Post (Credits)</span>
               </>
             ) : selectedDestination.type === 'community' ? (
               <>
                 <CreditIcon size={13} credited className="text-[#3B82FF] shrink-0" />
                 <span className="truncate max-w-[120px]">{selectedDestination.name}</span>
-                <span className="text-[10px] text-[#3B82FF] font-mono">(Credits)</span>
+                <span className="text-[10px] text-[#3B82FF] font-mono">(Credits & Discredits)</span>
               </>
             ) : (
               <>
@@ -265,7 +265,7 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
                 Post Destination
               </div>
 
-              {/* General / Normal Post Option */}
+              {/* General Post Option */}
               <button
                 type="button"
                 onClick={() => {
@@ -277,10 +277,10 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
                 }`}
               >
                 <span className="flex items-center gap-2">
-                  <Heart size={13} className="text-rose-400 fill-rose-500 shrink-0" />
-                  <span>General Feed (Normal)</span>
+                  <CreditIcon size={13} credited className="text-[#3B82FF] shrink-0" />
+                  <span>General Feed</span>
                 </span>
-                <span className="text-[10px] text-rose-400 font-mono">♥ Likes</span>
+                <span className="text-[10px] text-[#3B82FF] font-mono">Credits (C)</span>
               </button>
 
               {/* Communities List */}

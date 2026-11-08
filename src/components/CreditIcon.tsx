@@ -6,9 +6,15 @@ interface CreditIconProps {
   credited?: boolean;
 }
 
+interface DiscreditIconProps {
+  size?: number;
+  className?: string;
+  discredited?: boolean;
+}
+
 /**
- * CreditIcon - Renders a stylized 'C' credit coin emblem instead of a love/heart button
- * for posts published under communities or challenges.
+ * CreditIcon - Stylized 'C' credit coin emblem
+ * Used across the platform to replace likes with Credits (C).
  */
 export const CreditIcon: React.FC<CreditIconProps> = ({
   size = 18,
@@ -48,8 +54,53 @@ export const CreditIcon: React.FC<CreditIconProps> = ({
 };
 
 /**
+ * DiscreditIcon - Stylized 'DC' discredit coin emblem
+ * Used in communities alongside Credit (C) to allow Discredit (DC).
+ */
+export const DiscreditIcon: React.FC<DiscreditIconProps> = ({
+  size = 18,
+  className = '',
+  discredited = false,
+}) => {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={`inline-block shrink-0 transition-all ${
+        discredited ? 'active:scale-125' : 'group-hover:scale-110 active:scale-125'
+      } ${className}`}
+      aria-hidden="true"
+    >
+      {/* Coin outer rim */}
+      <circle
+        cx="12"
+        cy="12"
+        r="9.5"
+        fill={discredited ? '#EF4444' : 'transparent'}
+        stroke={discredited ? '#F87171' : 'currentColor'}
+        strokeWidth="1.75"
+      />
+      {/* 'D' glyph */}
+      <path
+        d="M6.5 8h2.6c1.6 0 2.9 1.4 2.9 3.5s-1.3 3.5-2.9 3.5H6.5V8zm1.6 5.5h1c.8 0 1.4-.7 1.4-2s-.6-2-1.4-2h-1v4z"
+        fill={discredited ? '#FFFFFF' : 'currentColor'}
+      />
+      {/* 'C' glyph */}
+      <path
+        d="M17.5 9.2c-.6-.7-1.4-1-2.2-1-1.6 0-2.8 1.4-2.8 3.3s1.2 3.3 2.8 3.3c.8 0 1.6-.3 2.2-1"
+        stroke={discredited ? '#FFFFFF' : 'currentColor'}
+        strokeWidth="1.75"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+};
+
+/**
  * Checks whether a post belongs to a community or challenge.
- * Community/challenge posts earn Credits (C), whereas normal standalone posts have Likes (Heart).
  */
 export const isCommunityOrChallengePost = (post?: {
   communityId?: string | null;

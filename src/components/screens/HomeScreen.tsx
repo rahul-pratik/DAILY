@@ -12,13 +12,14 @@ import {
   Loader2
 } from 'lucide-react';
 import { Author, Post } from '../../types';
-import { CreditIcon, isCommunityOrChallengePost } from '../CreditIcon';
+import { CreditIcon, DiscreditIcon, isCommunityOrChallengePost } from '../CreditIcon';
 
 interface HomeScreenProps {
   posts: Post[];
   currentUser: Author;
   onOpenCreate: () => void;
   onToggleLike: (postId: string) => void;
+  onToggleDiscredit?: (postId: string) => void;
   onToggleSave: (postId: string) => void;
   onOpenComments: (post: Post) => void;
   onOpenPostMenu: (post: Post) => void;
@@ -34,6 +35,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   currentUser,
   onOpenCreate,
   onToggleLike,
+  onToggleDiscredit,
   onToggleSave,
   onOpenComments,
   onOpenPostMenu,
@@ -480,50 +482,73 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
             {/* Post Engagement Action Bar */}
             {(() => {
-              const isCredited = isCommunityOrChallengePost(post);
+              const isCommPost = Boolean(post.communityId || post.communityName);
+              const isCredited = post.userVote === 'credit' || (post.isLiked && post.userVote !== 'discredit');
+              const isDiscredited = post.userVote === 'discredit';
+              const displayCredits = post.creditsCount ?? post.likesCount;
+
               return (
                 <div className="flex items-center justify-between text-[#9298A3] pt-1">
-                  <div className="flex items-center gap-6">
-                    {/* Like / Credits Button */}
-                    {isCredited ? (
+                  <div className="flex items-center gap-4 sm:gap-6">
+                    {/* Community Post: Credit (C) and Discredit (DC) */}
+                    {isCommPost ? (
+                      <div className="flex items-center gap-1.5 bg-[#090C13] border border-[#20242C] rounded-full px-2 py-1">
+                        {/* Credit (C) */}
+                        <button
+                          onClick={() => onToggleLike(post.id)}
+                          className={`flex items-center gap-1 text-xs font-semibold transition-colors cursor-pointer group ${
+                            isCredited ? 'text-[#3B82FF]' : 'hover:text-white'
+                          }`}
+                          aria-label={isCredited ? 'Remove credit' : 'Give credit (C)'}
+                          title={isCredited ? 'Credited' : 'Give credit (C)'}
+                        >
+                          <CreditIcon
+                            size={16}
+                            credited={isCredited}
+                            className={isCredited ? 'text-[#2166FF]' : 'text-[#9298A3] group-hover:text-white'}
+                          />
+                          <span className="tabular-nums font-mono">{displayCredits}</span>
+                        </button>
+
+                        <span className="text-[#20242C]">|</span>
+
+                        {/* Discredit (DC) */}
+                        <button
+                          onClick={() => onToggleDiscredit ? onToggleDiscredit(post.id) : onToggleLike(post.id)}
+                          className={`flex items-center gap-1 text-xs font-semibold transition-colors cursor-pointer group ${
+                            isDiscredited ? 'text-red-400' : 'hover:text-red-300'
+                          }`}
+                          aria-label={isDiscredited ? 'Remove discredit' : 'Discredit (DC)'}
+                          title={isDiscredited ? 'Discredited' : 'Discredit (DC)'}
+                        >
+                          <DiscreditIcon
+                            size={16}
+                            discredited={isDiscredited}
+                            className={isDiscredited ? 'text-red-500' : 'text-[#9298A3] group-hover:text-red-400'}
+                          />
+                        </button>
+                      </div>
+                    ) : (
+                      /* Feed Post: Credit (C) Button */
                       <button
                         onClick={() => onToggleLike(post.id)}
                         className={`flex items-center gap-1.5 text-xs font-medium transition-colors cursor-pointer group ${
-                          post.isLiked ? 'text-[#2166FF]' : 'hover:text-white'
+                          isCredited ? 'text-[#2166FF]' : 'hover:text-white'
                         }`}
-                        aria-label={post.isLiked ? 'Remove credit' : 'Give credit'}
-                        title={post.isLiked ? 'Credited' : 'Give credit (C)'}
+                        aria-label={isCredited ? 'Remove credit' : 'Give credit'}
+                        title={isCredited ? 'Credited' : 'Give credit (C)'}
                       >
                         <CreditIcon
                           size={18}
-                          credited={post.isLiked}
+                          credited={isCredited}
                           className={
-                            post.isLiked
+                            isCredited
                               ? 'text-[#2166FF]'
                               : 'text-[#9298A3] group-hover:text-white'
                           }
                         />
-                        <span className="tabular-nums font-mono font-semibold">{post.likesCount}</span>
+                        <span className="tabular-nums font-mono font-semibold">{displayCredits}</span>
                         <span className="text-[10px] text-[#8A92A6]">credits</span>
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => onToggleLike(post.id)}
-                        className={`flex items-center gap-1.5 text-xs font-medium transition-colors cursor-pointer group ${
-                          post.isLiked ? 'text-[#2166FF]' : 'hover:text-white'
-                        }`}
-                        aria-label="Like post"
-                        title={post.isLiked ? 'Liked' : 'Like'}
-                      >
-                        <Heart
-                          size={18}
-                          className={`transition-transform active:scale-125 ${
-                            post.isLiked
-                              ? 'fill-[#2166FF] text-[#2166FF]'
-                              : 'text-[#9298A3] group-hover:text-white'
-                          }`}
-                        />
-                        <span className="tabular-nums font-mono">{post.likesCount}</span>
                       </button>
                     )}
 

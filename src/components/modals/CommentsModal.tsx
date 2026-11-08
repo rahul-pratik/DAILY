@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { X, Send, Heart, Trash2 } from 'lucide-react';
+import { X, Send, Trash2 } from 'lucide-react';
 import { Author, Comment, Post } from '../../types';
+import { CreditIcon } from '../CreditIcon';
 
 interface CommentsModalProps {
   post: Post | null;
@@ -110,9 +111,9 @@ export const CommentsModal: React.FC<CommentsModalProps> = ({
                   {comment.text}
                 </p>
                 <div className="flex items-center justify-between text-[11px] text-[#9298A3]">
-                  <div className="flex items-center gap-1">
-                    <Heart size={12} className="hover:text-[#2166FF] cursor-pointer" />
-                    <span className="tabular-nums font-mono">{comment.likes}</span>
+                  <div className="flex items-center gap-1.5 text-[#3B82FF]">
+                    <CreditIcon size={13} credited className="text-[#3B82FF]" />
+                    <span className="tabular-nums font-mono text-[10px]">{comment.likes} credits</span>
                   </div>
 
                   {Boolean(

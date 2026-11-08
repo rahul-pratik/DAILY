@@ -34,6 +34,7 @@ export interface CommunityPost {
   communityId: string;
   communityName?: string;
   author: {
+    id?: string;
     name: string;
     username: string;
     avatar?: string;
@@ -44,7 +45,8 @@ export interface CommunityPost {
   category: 'Discussion' | 'Question' | 'Advice' | 'Story' | 'Milestone';
   badges?: string[];
   upvotes: number;
-  userVote?: 'up' | 'down' | null;
+  credits?: number;
+  userVote?: 'credit' | 'discredit' | 'up' | 'down' | null;
   timestamp: string;
   commentsCount: number;
   isPinned?: boolean;
@@ -96,8 +98,10 @@ export interface Post {
   imageUrl?: string;
   mediaType?: 'image' | 'video' | 'code';
   likesCount: number;
+  creditsCount?: number;
   commentsCount: number;
   isLiked?: boolean;
+  userVote?: 'credit' | 'discredit' | null;
   isSaved?: boolean;
   comments?: Comment[];
   communityId?: string;

@@ -92,10 +92,10 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             </button>
 
             <button
-              onClick={onOpenAccountabilityHub || onNavigateProfile}
+              onClick={onNavigateProfile}
               className="w-8 h-8 rounded-full overflow-hidden border border-[#2166FF]/60 hover:border-[#2166FF] transition-all ml-1 cursor-pointer focus:outline-none relative group"
-              aria-label="Accountability & Planner Hub"
-              title="Accountability Hub & Daily Planner"
+              aria-label="Profile"
+              title="My Profile"
             >
               <img
                 src={currentUser.avatar}

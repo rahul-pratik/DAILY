@@ -4,7 +4,6 @@ import {
   MessageSquare, 
   Flame, 
   Camera, 
-  Heart, 
   Trophy, 
   Users, 
   CheckCircle, 
@@ -37,93 +36,7 @@ interface CohortDiscussionsScreenProps {
 }
 
 const DEFAULT_COHORT_PROOFS: Record<string, CohortProof[]> = {
-  default: [
-    {
-      id: 'cp_sarah',
-      challengeId: 'ch_run5k',
-      author: {
-        id: 'u2',
-        name: 'Sarah Jenkins',
-        username: 'runwithme',
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-        isFollowing: true,
-      },
-      dayNumber: 3,
-      note: 'Day 3 sprint verified: 5.2 km logged in 24:12 pace along morning waterfront trail. Split intervals recorded.',
-      photoUrl: 'https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?w=800&auto=format&fit=crop&q=80',
-      timestamp: '2h ago',
-      likesCount: 24,
-      isLiked: true,
-    },
-    {
-      id: 'cp_elena',
-      challengeId: 'ch_reading30',
-      author: {
-        id: 'u3',
-        name: 'Elena Rostova',
-        username: 'elena.ai',
-        avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
-        isFollowing: false,
-      },
-      dayNumber: 3,
-      note: 'Day 3 proof: 34 pages read from The Design of Everyday Things. Annotated mental model ergonomics in margin.',
-      photoUrl: 'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=800&auto=format&fit=crop&q=80',
-      timestamp: '3h ago',
-      likesCount: 19,
-      isLiked: false,
-    },
-    {
-      id: 'cp_devin',
-      challengeId: 'ch_software',
-      author: {
-        id: 'u4',
-        name: 'Devin Cole',
-        username: 'devin.creates',
-        avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-        isFollowing: true,
-      },
-      dayNumber: 2,
-      note: 'Day 2 progress: Database schema migrations written and full test suite green. Terminal screenshot attached!',
-      photoUrl: 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=800&auto=format&fit=crop&q=80',
-      timestamp: 'Yesterday',
-      likesCount: 15,
-      isLiked: false,
-    },
-    {
-      id: 'cp_alex',
-      challengeId: 'ch_buildsomething',
-      author: {
-        id: 'u5',
-        name: 'Alex Morgan',
-        username: 'creator',
-        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-        isFollowing: true,
-      },
-      dayNumber: 2,
-      note: 'Day 2 documentation and architecture diagram verified. Squad open-source repository updated.',
-      photoUrl: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800&auto=format&fit=crop&q=80',
-      timestamp: 'Yesterday',
-      likesCount: 12,
-      isLiked: true,
-    },
-    {
-      id: 'cp_aarav',
-      challengeId: 'ch_software',
-      author: {
-        id: 'user_aarav',
-        name: 'Aarav Sharma',
-        username: 'aarav.codes',
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-        isCurrentUser: true,
-      },
-      dayNumber: 1,
-      note: 'Day 1 sprint: Built auth modal and verified token refresh pipeline. Live testing passing.',
-      photoUrl: 'https://images.unsplash.com/photo-1461749280684-dccba630e2f6?w=800&auto=format&fit=crop&q=80',
-      timestamp: '2d ago',
-      likesCount: 32,
-      isLiked: true,
-    }
-  ]
+  default: [],
 };
 
 export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = ({

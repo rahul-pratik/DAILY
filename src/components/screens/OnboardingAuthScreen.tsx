@@ -28,7 +28,6 @@ import {
 } from 'lucide-react';
 import { Author } from '../../types';
 import { supabase, syncProfileToSupabase, isValidUUID, uploadMediaToSupabase } from '../../lib/supabase';
-import { OTHER_USERS } from '../../data/initialData';
 import { ImageCropModal } from '../modals/ImageCropModal';
 import { PRIVACY_POLICY_CONTENT, TERMS_AND_CONDITIONS_CONTENT } from '../../data/legalText';
 
@@ -81,11 +80,9 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
   const [usernameMessage, setUsernameMessage] = useState<string | null>(null);
   const checkTimeoutRef = useRef<any>(null);
 
-  // Reserved usernames list (system handles & known creators)
+  // Reserved usernames list (system handles)
   const reservedUsernames = new Set([
-    'admin', 'daily', 'builder', 'official', 'support', 'help', 'system', 'root', 'bot',
-    ...Object.keys(OTHER_USERS).map((u) => u.toLowerCase()),
-    ...Object.values(OTHER_USERS).map((u) => u.username.toLowerCase())
+    'admin', 'daily', 'builder', 'official', 'support', 'help', 'system', 'root', 'bot'
   ]);
 
   // Handle returning from Google OAuth or window focus reset if user closed popup without completing
@@ -195,7 +192,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
       return;
     }
 
-    // Check system reserved handles & known mock creators
+    // Check system reserved handles
     if (reservedUsernames.has(clean)) {
       setUsernameStatus('taken');
       setUsernameMessage(`@${clean} is reserved or already taken. Please choose another.`);

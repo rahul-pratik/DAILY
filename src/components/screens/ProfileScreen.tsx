@@ -31,6 +31,7 @@ import { CreditIcon, isCommunityOrChallengePost } from '../CreditIcon';
 
 interface ProfileScreenProps {
   user: Author;
+  currentUser?: Author;
   posts: Post[];
   challenges: Challenge[];
   joinedCommunitiesCount: number;
@@ -53,6 +54,7 @@ interface ProfileScreenProps {
 
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   user,
+  currentUser,
   posts,
   challenges,
   joinedCommunitiesCount,
@@ -80,7 +82,14 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [privateHubAlert, setPrivateHubAlert] = useState(false);
   const [postToDelete, setPostToDelete] = useState<Post | null>(null);
 
-  const isSelf = user.isCurrentUser;
+  // Check if viewing own profile
+  const isSelf = Boolean(
+    (currentUser && (
+      (user.id && currentUser.id && user.id === currentUser.id) ||
+      (user.username && currentUser.username && user.username.toLowerCase() === currentUser.username.toLowerCase())
+    )) ||
+    user.isCurrentUser
+  );
 
   // Sync privacy if prop changes
   React.useEffect(() => {
@@ -89,55 +98,52 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     }
   }, [user.accountabilityHubPrivacy]);
 
-  // Filter posts written by this user
+  // Filter posts written by this user (case-insensitive username or ID)
   const userPosts = posts.filter(
-    (p) => p.author.username === user.username || p.author.id === user.id
+    (p) =>
+      (p.author.username && user.username && p.author.username.toLowerCase() === user.username.toLowerCase()) ||
+      (p.author.id && user.id && p.author.id === user.id)
   );
   const savedPosts = posts.filter((p) => p.isSaved);
 
-  // Total likes and credits accumulated over each post written by this user
-  const { totalLikesAccumulated, totalCreditsAccumulated } = React.useMemo(() => {
-    let likes = 0;
+  // Total credits accumulated over each post written by this user
+  const totalCreditsAccumulated = React.useMemo(() => {
     let credits = 0;
     userPosts.forEach((p) => {
-      if (isCommunityOrChallengePost(p)) {
-        credits += (p.likesCount || 0);
-      } else {
-        likes += (p.likesCount || 0);
-      }
+      credits += (p.creditsCount ?? p.likesCount ?? 0);
     });
-    return { totalLikesAccumulated: likes, totalCreditsAccumulated: credits };
+    return credits;
   }, [userPosts]);
 
   // Filter following users for this profile
   const followingUsers = React.useMemo(() => {
     if (isSelf) {
       // Current user follows accounts where isFollowing is true
-      return allUsers.filter((u) => u.isFollowing && u.username !== user.username);
+      return allUsers.filter((u) => u.isFollowing && u.username?.toLowerCase() !== user.username?.toLowerCase());
     }
     // Viewing other profile: show community creators & peers
-    return allUsers.filter((u) => u.username !== user.username);
+    return allUsers.filter((u) => u.username?.toLowerCase() !== user.username?.toLowerCase());
   }, [allUsers, isSelf, user.username]);
 
-  // Filter challenges joined by this user
+  // Filter challenges joined by this user (no fake mock IDs)
   const joinedChallenges = isSelf
     ? challenges.filter((c) => c.joined && c.status !== 'completed' && c.current < c.target)
     : challenges.filter((c) => 
-        (c.joined || c.squadMembers?.some(m => m.username === user.username) || c.creator?.username === user.username || c.id === 'ch_run5k') &&
+        (c.joined || c.squadMembers?.some(m => m.username?.toLowerCase() === user.username?.toLowerCase()) || c.creator?.username?.toLowerCase() === user.username?.toLowerCase()) &&
         c.status !== 'completed' && c.current < c.target
       );
 
-  // Filter challenges completed by this user
+  // Filter challenges completed by this user (no fake mock IDs)
   const completedChallenges = isSelf
     ? challenges.filter((c) => c.status === 'completed' || c.current >= c.target)
     : challenges.filter((c) => 
         (c.status === 'completed' || c.current >= c.target) &&
-        (c.creator?.username === user.username || c.squadMembers?.some(m => m.username === user.username) || c.id === 'ch_coding30' || c.id === 'ch_buildsomething')
+        (c.creator?.username?.toLowerCase() === user.username?.toLowerCase() || c.squadMembers?.some(m => m.username?.toLowerCase() === user.username?.toLowerCase()))
       );
 
   // Filter communities for this user
   const userCommunities = allCommunities.filter((c) => 
-    isSelf ? c.isJoined : (c.creator?.username === user.username || c.isJoined)
+    isSelf ? c.isJoined : (c.creator?.username?.toLowerCase() === user.username?.toLowerCase() || c.isJoined)
   );
 
   const handleTogglePrivacySetting = () => {
@@ -182,10 +188,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black" />
 
         {/* Back Button if viewing another profile */}
-        {!isSelf && onBack && (
+        {!isSelf && (
           <button
-            onClick={onBack}
-            className="absolute top-3 left-3 px-3 py-1.5 rounded-full bg-black/60 hover:bg-black text-white text-xs font-semibold flex items-center gap-1.5 backdrop-blur-md transition-all cursor-pointer border border-white/10"
+            onClick={() => {
+              if (onBack) onBack();
+              else window.history.back();
+            }}
+            className="absolute top-3 left-3 px-3.5 py-1.5 rounded-full bg-black/70 hover:bg-black text-white text-xs font-semibold flex items-center gap-1.5 backdrop-blur-md transition-all cursor-pointer border border-white/20 shadow-lg z-20"
             aria-label="Go back"
           >
             <ArrowLeft size={15} />
@@ -438,28 +447,22 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             </span>
           </button>
 
-          {/* 4. Total Likes & Credits Accumulated Over Each Post */}
+          {/* 4. Total Credits Accumulated Over Each Post */}
           <button 
             type="button"
             onClick={() => setActiveTab('posts')}
             className="flex flex-col items-center justify-center py-1 px-1 rounded-xl hover:bg-[#101010] transition-all cursor-pointer group"
-            title="Likes & Credits accumulated over each post"
+            title="Total credits accumulated over each post"
           >
-            <div className="flex items-center justify-center gap-1.5 flex-wrap">
-              <span className="text-sm sm:text-base font-bold text-rose-400 tabular-nums font-mono flex items-center gap-0.5" title="Likes">
-                <Heart size={11} className="fill-rose-500 text-rose-500 shrink-0" />
-                <span>{totalLikesAccumulated}</span>
-              </span>
-              <span className="text-sm sm:text-base font-bold text-[#3B82FF] tabular-nums font-mono flex items-center gap-0.5" title="Credits">
-                <CreditIcon size={13} credited className="text-[#3B82FF] shrink-0" />
-                <span>{totalCreditsAccumulated}</span>
-              </span>
-            </div>
+            <span className="text-base sm:text-lg font-bold text-[#3B82FF] tabular-nums font-mono flex items-center justify-center gap-1 group-hover:text-white transition-colors" title="Total Credits">
+              <CreditIcon size={16} credited className="text-[#3B82FF] shrink-0" />
+              <span>{totalCreditsAccumulated}</span>
+            </span>
             <span className="text-[10px] text-[#9298A3] group-hover:text-white transition-colors truncate max-w-full font-medium">
-              Likes & Credits
+              Credits
             </span>
             <span className="text-[9px] text-[#3B82FF] font-mono">
-              Accumulated
+              Earned
             </span>
           </button>
         </div>
@@ -547,17 +550,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
                 <div className="flex items-center justify-between text-xs text-[#9298A3] font-mono pt-2 border-t border-[#20242C]/50">
                   <div className="flex items-center gap-4">
-                    {isCommunityOrChallengePost(post) ? (
-                      <span className="flex items-center gap-1.5 text-[#3B82FF] transition-colors" title="Credits">
-                        <CreditIcon size={14} credited={post.isLiked} className={post.isLiked ? 'text-[#2166FF]' : 'text-[#9298A3]'} />
-                        <span className="font-semibold">{post.likesCount} credits</span>
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1.5 hover:text-white transition-colors" title="Likes">
-                        <Heart size={14} className={post.isLiked ? 'fill-red-500 text-red-500' : ''} />
-                        <span>{post.likesCount}</span>
-                      </span>
-                    )}
+                    <span className="flex items-center gap-1.5 text-[#3B82FF] transition-colors" title="Credits">
+                      <CreditIcon size={14} credited={post.isLiked || post.userVote === 'credit'} className={(post.isLiked || post.userVote === 'credit') ? 'text-[#2166FF]' : 'text-[#9298A3]'} />
+                      <span className="font-semibold">{post.creditsCount ?? post.likesCount} credits</span>
+                    </span>
                     <span className="flex items-center gap-1.5 hover:text-white transition-colors">
                       <MessageSquare size={14} />
                       <span>{post.commentsCount}</span>
@@ -565,8 +561,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                   </div>
 
                   <div className="flex items-center gap-1.5">
-                    {/* Feature 2: Delete button for user's own posts */}
-                    {(isSelf || post.author.username === user.username) && onDeletePost && (
+                    {/* Delete button: strictly ONLY for posts written by currentUser */}
+                    {Boolean(
+                      currentUser && (
+                        (post.author.id && currentUser.id && post.author.id === currentUser.id) ||
+                        (post.author.username && currentUser.username && post.author.username.toLowerCase() === currentUser.username.toLowerCase())
+                      )
+                    ) && onDeletePost && (
                       <button
                         type="button"
                         onClick={(e) => {
@@ -649,17 +650,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
                 <div className="flex items-center justify-between text-xs text-[#9298A3] font-mono pt-2 border-t border-[#20242C]/50">
                   <div className="flex items-center gap-4">
-                    {isCommunityOrChallengePost(post) ? (
-                      <span className="flex items-center gap-1.5 text-[#3B82FF] transition-colors" title="Credits">
-                        <CreditIcon size={14} credited={post.isLiked} className={post.isLiked ? 'text-[#2166FF]' : 'text-[#9298A3]'} />
-                        <span className="font-semibold">{post.likesCount} credits</span>
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1.5 hover:text-white transition-colors" title="Likes">
-                        <Heart size={14} className={post.isLiked ? 'fill-red-500 text-red-500' : ''} />
-                        <span>{post.likesCount}</span>
-                      </span>
-                    )}
+                    <span className="flex items-center gap-1.5 text-[#3B82FF] transition-colors" title="Credits">
+                      <CreditIcon size={14} credited={post.isLiked || post.userVote === 'credit'} className={(post.isLiked || post.userVote === 'credit') ? 'text-[#2166FF]' : 'text-[#9298A3]'} />
+                      <span className="font-semibold">{post.creditsCount ?? post.likesCount} credits</span>
+                    </span>
                     <span className="flex items-center gap-1.5 hover:text-white transition-colors">
                       <MessageSquare size={14} />
                       <span>{post.commentsCount}</span>

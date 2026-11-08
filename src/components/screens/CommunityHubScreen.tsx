@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { Author, Community, CommunityPost, Post } from '../../types';
 import { CommunityModeratorModal } from '../modals/CommunityModeratorModal';
-import { CreditIcon } from '../CreditIcon';
+import { CreditIcon, DiscreditIcon } from '../CreditIcon';
 import { getSafeUUID, toDeterministicUUID } from '../../lib/supabase';
 
 interface CommunityHubScreenProps {
@@ -540,27 +540,42 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
               key={post.id}
               className="p-4 rounded-3xl bg-[#080B10] border border-[#20242C] transition-all flex gap-3.5 group"
             >
-              {/* Left Credits Column */}
-              <div className="flex flex-col items-center justify-center bg-[#101010]/80 border border-[#20242C] rounded-2xl p-2 shrink-0 self-start min-w-[50px]">
+              {/* Left Credits & Discredits Column */}
+              <div className="flex flex-col items-center justify-center bg-[#101010]/90 border border-[#20242C] rounded-2xl p-2 shrink-0 self-start min-w-[54px] gap-1">
+                {/* Credit (C) Button */}
                 <button
                   onClick={() => handleVote(post.id, 'up')}
                   className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all cursor-pointer ${
                     post.userVote === 'up'
-                      ? 'text-[#2166FF] bg-[#2166FF]/15 border border-[#2166FF]/35 shadow-sm shadow-[#2166FF]/25'
+                      ? 'text-[#2166FF] bg-[#2166FF]/20 border border-[#2166FF]/40 shadow-sm shadow-[#2166FF]/25'
                       : 'text-[#9298A3] hover:text-white hover:bg-[#1a1f29] border border-transparent'
                   }`}
-                  aria-label={post.userVote === 'up' ? 'Remove credit' : 'Give credit'}
-                  title={post.userVote === 'up' ? 'Credited' : 'Give credit (C)'}
+                  aria-label={post.userVote === 'up' ? 'Remove credit' : 'Give credit (C)'}
+                  title={post.userVote === 'up' ? 'Credited' : 'Credit (C)'}
                 >
-                  <CreditIcon size={18} credited={post.userVote === 'up'} />
+                  <CreditIcon size={17} credited={post.userVote === 'up'} />
                 </button>
 
-                <span className="text-xs font-bold font-mono tabular-nums text-white mt-1">
+                <span className="text-xs font-bold font-mono tabular-nums text-white">
                   {post.upvotes}
                 </span>
-                <span className="text-[9px] font-semibold text-[#8A92A6] uppercase tracking-wider">
+                <span className="text-[8px] font-semibold text-[#8A92A6] uppercase tracking-wider">
                   Credits
                 </span>
+
+                {/* Discredit (DC) Button */}
+                <button
+                  onClick={() => handleVote(post.id, 'down')}
+                  className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all cursor-pointer ${
+                    post.userVote === 'down'
+                      ? 'text-red-400 bg-red-500/20 border border-red-500/40 shadow-sm shadow-red-500/25'
+                      : 'text-[#9298A3] hover:text-red-400 hover:bg-[#1a1f29] border border-transparent'
+                  }`}
+                  aria-label={post.userVote === 'down' ? 'Remove discredit' : 'Discredit (DC)'}
+                  title={post.userVote === 'down' ? 'Discredited' : 'Discredit (DC)'}
+                >
+                  <DiscreditIcon size={17} discredited={post.userVote === 'down'} />
+                </button>
               </div>
 
               {/* Main Card Content */}
@@ -609,14 +624,21 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => setLocalPosts(prev => prev.filter(p => p.id !== post.id))}
-                    className="text-[#9298A3] hover:text-red-400 p-1 cursor-pointer transition-colors"
-                    aria-label="Delete post"
-                    title="Remove discussion post"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  {/* Delete button: ONLY visible if current user is author or community moderator */}
+                  {Boolean(
+                    (post.author.username && currentUser.username && post.author.username.toLowerCase() === currentUser.username.toLowerCase()) ||
+                    (post.author.id && currentUser.id && post.author.id === currentUser.id) ||
+                    (community.creator && currentUser.username && community.creator.username.toLowerCase() === currentUser.username.toLowerCase())
+                  ) && (
+                    <button
+                      onClick={() => setLocalPosts(prev => prev.filter(p => p.id !== post.id))}
+                      className="text-[#9298A3] hover:text-red-400 p-1 cursor-pointer transition-colors"
+                      aria-label="Delete post"
+                      title="Remove discussion post"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                 </div>
 
                 {/* Post Title */}

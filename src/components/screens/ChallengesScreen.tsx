@@ -87,15 +87,12 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
 
   // Track daily check-in completion for Squad Status progress tracking
   // Map of squadId -> set of usernames who completed today's check-in
-  const [squadCheckedInMap, setSquadCheckedInMap] = useState<Record<string, string[]>>({
-    squad_run5k: ['runwithme', 'aarav.codes', 'devin.creates'], // 3 of 4 checked in initially
-    squad_code_obsidian: ['aarav.codes', 'runwithme', 'elena.ai', 'devin.creates', 'creator'], // 5 of 5 checked in initially
-  });
+  const [squadCheckedInMap, setSquadCheckedInMap] = useState<Record<string, string[]>>({});
 
   // Modal states
   const [isCreateSquadModalOpen, setIsCreateSquadModalOpen] = useState(false);
   const [newSquadName, setNewSquadName] = useState('');
-  const [newSquadChallengeId, setNewSquadChallengeId] = useState(challenges[0]?.id || 'ch_run5k');
+  const [newSquadChallengeId, setNewSquadChallengeId] = useState(challenges[0]?.id || '');
   const [newSquadRequiredSize, setNewSquadRequiredSize] = useState<number>(5);
   const [selectedInviteUsernames, setSelectedInviteUsernames] = useState<string[]>([]);
 

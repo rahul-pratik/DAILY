@@ -31,7 +31,6 @@ import {
   Lock
 } from 'lucide-react';
 import { Author, Challenge, CohortProof, Community, CommunityPost, ToDoItem } from '../../types';
-import { INITIAL_COMMUNITY_WRITINGS } from '../../data/initialData';
 import { CreditIcon } from '../CreditIcon';
 
 interface AccountabilityHubScreenProps {
@@ -62,7 +61,7 @@ export const AccountabilityHubScreen: React.FC<AccountabilityHubScreenProps> = (
   allChallenges = [],
   joinedCommunities,
   allCommunities = [],
-  communityWritings = INITIAL_COMMUNITY_WRITINGS,
+  communityWritings = [],
   onBack,
   onToggleToDo,
   onAddCustomToDo,
@@ -93,12 +92,11 @@ export const AccountabilityHubScreen: React.FC<AccountabilityHubScreenProps> = (
   const [showAddForm, setShowAddForm] = useState(false);
 
   // Completed challenges & Proofs Showcase state
-  // Prioritize completed challenge with 30 proofs if available
   const allFinished = completedChallenges.length > 0 
     ? completedChallenges 
     : allChallenges.filter(c => c.status === 'completed' || c.current >= c.target);
 
-  const defaultSelectedChallenge = allFinished.find(c => c.id === 'ch_coding30') || allFinished[0] || null;
+  const defaultSelectedChallenge = allFinished[0] || null;
   const [selectedCompletedChallenge, setSelectedCompletedChallenge] = useState<Challenge | null>(defaultSelectedChallenge);
   const [proofViewMode, setProofViewMode] = useState<'grid' | 'timeline'>('grid');
   const [proofSearchQuery, setProofSearchQuery] = useState('');
@@ -113,7 +111,7 @@ export const AccountabilityHubScreen: React.FC<AccountabilityHubScreenProps> = (
   
   // Quick write in community form
   const [showWriteComposer, setShowWriteComposer] = useState(false);
-  const [composerCommunityId, setComposerCommunityId] = useState(joinedCommunities[0]?.id || 'comm_growingup');
+  const [composerCommunityId, setComposerCommunityId] = useState(joinedCommunities[0]?.id || allCommunities[0]?.id || '');
   const [composerTitle, setComposerTitle] = useState('');
   const [composerContent, setComposerContent] = useState('');
   const [composerCategory, setComposerCategory] = useState<'Discussion' | 'Question' | 'Advice' | 'Story' | 'Milestone'>('Discussion');

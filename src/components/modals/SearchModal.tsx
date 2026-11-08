@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Search, X, Users, Trophy, Loader2, Clock, Trash2, TrendingUp, Sparkles } from 'lucide-react';
 import { Author, Challenge, Community, Post } from '../../types';
 import { supabase } from '../../lib/supabase';
-import { OTHER_USERS } from '../../data/initialData';
 
 const RECENT_SEARCHES_KEY = 'daily_recent_searches';
 
@@ -147,11 +146,8 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     return () => clearTimeout(timeoutId);
   }, [query]);
 
-  // Combine local creators, known other users, and Supabase accounts
-  const knownLocalCreators: Author[] = [
-    ...creators,
-    ...Object.values(OTHER_USERS),
-  ];
+  // Combine passed creators and Supabase accounts
+  const knownLocalCreators: Author[] = [...creators];
 
   const filteredLocalCreators = query.trim()
     ? knownLocalCreators.filter(

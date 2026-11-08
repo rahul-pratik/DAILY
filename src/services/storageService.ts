@@ -147,7 +147,42 @@ export const StorageService = {
     safeSet(KEYS.SQUADS, squads);
   },
 
-  // User Likes & Bookmarks (namespaced per user to prevent cross-account overlap)
+  // User Credits & Community Votes (replacing likes with credits & discredits)
+  getUserCredits(userId?: string): string[] {
+    const key = userId ? `daily_app_user_credits_${userId}` : 'daily_app_user_credits';
+    const stored = safeParse<string[]>(key, []);
+    if (stored.length > 0) return stored;
+    // Fallback to previous likes if migrating
+    return this.getUserLikes(userId);
+  },
+
+  saveUserCredits(creditedPostIds: string[], userId?: string): void {
+    const key = userId ? `daily_app_user_credits_${userId}` : 'daily_app_user_credits';
+    safeSet(key, creditedPostIds);
+    safeSet('daily_app_user_credits', creditedPostIds);
+    // Mirror to likes for Supabase fallback compatibility
+    this.saveUserLikes(creditedPostIds, userId);
+  },
+
+  // Community Votes ('credit' | 'discredit')
+  getCommunityVotes(userId?: string): Record<string, 'credit' | 'discredit'> {
+    const key = userId ? `daily_app_comm_votes_${userId}` : 'daily_app_comm_votes';
+    return safeParse<Record<string, 'credit' | 'discredit'>>(key, {});
+  },
+
+  saveCommunityVote(postId: string, vote: 'credit' | 'discredit' | null, userId?: string): void {
+    const key = userId ? `daily_app_comm_votes_${userId}` : 'daily_app_comm_votes';
+    const current = this.getCommunityVotes(userId);
+    if (!vote) {
+      delete current[postId];
+    } else {
+      current[postId] = vote;
+    }
+    safeSet(key, current);
+    safeSet('daily_app_comm_votes', current);
+  },
+
+  // User Likes & Bookmarks (backward compatibility)
   getUserLikes(userId?: string): string[] {
     const key = userId ? `daily_app_user_likes_${userId}` : 'daily_app_user_likes';
     return safeParse<string[]>(key, []);
@@ -156,7 +191,6 @@ export const StorageService = {
   saveUserLikes(likedPostIds: string[], userId?: string): void {
     const key = userId ? `daily_app_user_likes_${userId}` : 'daily_app_user_likes';
     safeSet(key, likedPostIds);
-    // Also mirror to generic key for backward compatibility
     safeSet('daily_app_user_likes', likedPostIds);
   },
 
@@ -169,6 +203,24 @@ export const StorageService = {
     const key = userId ? `daily_app_user_bookmarks_${userId}` : 'daily_app_user_bookmarks';
     safeSet(key, bookmarkedPostIds);
     safeSet('daily_app_user_bookmarks', bookmarkedPostIds);
+  },
+
+  // Purge any old fake mock challenges or communities stored in localStorage
+  purgeMockData(): void {
+    try {
+      const storedChs = this.getChallenges();
+      if (storedChs) {
+        const cleanChs = storedChs.filter((c) => !c.id.startsWith('ch_'));
+        this.saveChallenges(cleanChs);
+      }
+      const storedComms = this.getCommunities();
+      if (storedComms) {
+        const cleanComms = storedComms.filter((c) => !c.id.startsWith('comm_'));
+        this.saveCommunities(cleanComms);
+      }
+    } catch {
+      // ignore
+    }
   },
 
   // Cross-account Comments Registry (persists comments across accounts and sessions)
