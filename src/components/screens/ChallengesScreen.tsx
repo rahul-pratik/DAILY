@@ -25,7 +25,8 @@ import {
   Sparkles,
   Trash2
 } from 'lucide-react';
-import { Author, Challenge, Squad, SquadMember } from '../../types';
+import { Author, Challenge, Squad, SquadMember, SquadChatMessage } from '../../types';
+import { StorageService } from '../../services/storageService';
 
 interface ChallengesScreenProps {
   challenges: Challenge[];
@@ -48,6 +49,8 @@ interface ChallengesScreenProps {
   onAcceptAllSquadEntry?: (squadId: string) => void;
   onDeleteSquad?: (squadId: string) => void;
   onDeleteChallenge?: (challengeId: string) => void;
+  squadChatMessages?: SquadChatMessage[];
+  onSendSquadMessage?: (squadId: string, text: string) => void;
 }
 
 export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
@@ -70,24 +73,62 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
   onAcceptAllSquadEntry,
   onDeleteSquad,
   onDeleteChallenge,
+  squadChatMessages: syncedSquadChatMessages,
+  onSendSquadMessage,
 }) => {
-  // Top 3-tab view mode: 'challenges' | 'squad_status' | 'manage_squads'
-  const [viewMode, setViewMode] = useState<'challenges' | 'squad_status' | 'manage_squads'>('challenges');
+  // Top 3-tab view mode: 'challenges' | 'squad_chat' | 'manage_squads'
+  const [viewMode, setViewMode] = useState<'challenges' | 'squad_chat' | 'manage_squads'>('challenges');
   const [activeFilter, setActiveFilter] = useState<'all' | 'squads' | 'solo' | 'joined'>('all');
+  const [sortBy, setSortBy] = useState<'recent' | 'popularity' | 'difficulty'>('recent');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string>('#All Tags');
+
+  // Squad Accountability Rule Modal state
+  const [ruleModalChallenge, setRuleModalChallenge] = useState<Challenge | null>(null);
+
+  // Squad Chat states
+  const [selectedSquadIdForChat, setSelectedSquadIdForChat] = useState<string>(squads[0]?.id || '');
+  const [squadChatMessages, setSquadChatMessages] = useState<SquadChatMessage[]>([]);
+  const [chatInputText, setChatInputText] = useState<string>('');
+
+  React.useEffect(() => {
+    if (squads.length > 0 && (!selectedSquadIdForChat || !squads.some(s => s.id === selectedSquadIdForChat))) {
+      setSelectedSquadIdForChat(squads[0].id);
+    }
+  }, [squads, selectedSquadIdForChat]);
+
+  React.useEffect(() => {
+    if (selectedSquadIdForChat) {
+      const syncedMessages = syncedSquadChatMessages?.filter((message) => message.squadId === selectedSquadIdForChat);
+      const localMessages = StorageService.getSquadChatMessages(selectedSquadIdForChat) as SquadChatMessage[];
+      const messagesById = new Map(localMessages.map((message) => [message.id, message]));
+      (syncedMessages || []).forEach((message) => messagesById.set(message.id, message));
+      setSquadChatMessages(Array.from(messagesById.values()));
+    }
+  }, [selectedSquadIdForChat, syncedSquadChatMessages]);
+
+  const handleSendSquadMessage = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!chatInputText.trim() || !selectedSquadIdForChat || !currentUser) return;
+    const newMsg: SquadChatMessage = {
+      id: `sqmsg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      squadId: selectedSquadIdForChat,
+      author: currentUser,
+      text: chatInputText.trim(),
+      timestamp: 'Just now',
+    };
+    if (onSendSquadMessage) {
+      onSendSquadMessage(selectedSquadIdForChat, chatInputText.trim());
+    } else {
+      StorageService.addSquadChatMessage(selectedSquadIdForChat, newMsg);
+      setSquadChatMessages((prev) => [...prev, newMsg]);
+    }
+    setChatInputText('');
+  };
 
   // Deletion confirm states (Creator only)
   const [squadToDelete, setSquadToDelete] = useState<Squad | null>(null);
   const [challengeToDelete, setChallengeToDelete] = useState<Challenge | null>(null);
-
-  // Track which members missed their daily photo proof / check-in
-  // Map of squadId/challengeId -> list of usernames who missed
-  const [squadFailedMembers, setSquadFailedMembers] = useState<Record<string, string[]>>({});
-
-  // Track daily check-in completion for Squad Status progress tracking
-  // Map of squadId -> set of usernames who completed today's check-in
-  const [squadCheckedInMap, setSquadCheckedInMap] = useState<Record<string, string[]>>({});
 
   // Modal states
   const [isCreateSquadModalOpen, setIsCreateSquadModalOpen] = useState(false);
@@ -114,54 +155,6 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
     '#Startups',
     '#Nutrition'
   ];
-
-  // Toggle member check-in status in Squad Status view
-  const handleToggleMemberCheckIn = (squadId: string, username: string) => {
-    setSquadCheckedInMap(prev => {
-      const currentList = prev[squadId] || [];
-      const isAlreadyCheckedIn = currentList.includes(username);
-      const updated = isAlreadyCheckedIn 
-        ? currentList.filter(u => u !== username) 
-        : [...currentList, username];
-      return { ...prev, [squadId]: updated };
-    });
-
-    // If marked as not checked in, also register in squadFailedMembers for streak simulation
-    setSquadFailedMembers(prev => {
-      const currentFailed = prev[squadId] || [];
-      const currentCheckedIn = squadCheckedInMap[squadId] || [];
-      const isNowCheckedIn = !currentCheckedIn.includes(username);
-      
-      if (isNowCheckedIn) {
-        return { ...prev, [squadId]: currentFailed.filter(u => u !== username) };
-      } else {
-        return { ...prev, [squadId]: [...new Set([...currentFailed, username])] };
-      }
-    });
-  };
-
-  // Toggle member failed photo proof status
-  const handleToggleMemberProofStatus = (squadId: string, username: string) => {
-    setSquadFailedMembers(prev => {
-      const currentList = prev[squadId] || [];
-      const hasFailed = currentList.includes(username);
-      const updated = hasFailed ? currentList.filter(u => u !== username) : [...currentList, username];
-      return { ...prev, [squadId]: updated };
-    });
-
-    // Keep check-in map aligned
-    setSquadCheckedInMap(prev => {
-      const currentCheckedIn = prev[squadId] || [];
-      const hasFailed = (squadFailedMembers[squadId] || []).includes(username);
-      if (hasFailed) {
-        // Restoring
-        return { ...prev, [squadId]: [...new Set([...currentCheckedIn, username])] };
-      } else {
-        // Failing
-        return { ...prev, [squadId]: currentCheckedIn.filter(u => u !== username) };
-      }
-    });
-  };
 
   // Filter challenges for the All Challenges view
   const filteredChallenges = challenges.filter((ch) => {
@@ -196,6 +189,28 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
     }
 
     return true;
+  });
+
+  const getChallengeDifficulty = (challenge: Challenge): NonNullable<Challenge['difficulty']> => {
+    if (challenge.difficulty) return challenge.difficulty;
+    const duration = challenge.durationDays || challenge.target;
+    return duration <= 7 ? 'Easy' : duration <= 21 ? 'Medium' : 'Hard';
+  };
+
+  // Sort challenges by Recently Added, Popularity, or Difficulty
+  const sortedChallenges = [...filteredChallenges].sort((a, b) => {
+    if (sortBy === 'popularity') {
+      const popA = a.participantsCount ?? (a.joined ? 1 : 0);
+      const popB = b.participantsCount ?? (b.joined ? 1 : 0);
+      return popB - popA;
+    }
+    if (sortBy === 'difficulty') {
+      const difficultyRank = { Easy: 0, Medium: 1, Hard: 2 };
+      const diffA = difficultyRank[getChallengeDifficulty(a)];
+      const diffB = difficultyRank[getChallengeDifficulty(b)];
+      return diffB - diffA;
+    }
+    return (Date.parse(b.createdAt || '') || 0) - (Date.parse(a.createdAt || '') || 0);
   });
 
   const getChallengeIcon = (iconName: string) => {
@@ -282,9 +297,6 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
             <Trophy size={19} className="text-[#2166FF]" />
             <span>Challenges & Squads</span>
           </h1>
-          <p className="text-xs text-[#8A92A6]">
-            Daily proof sprints & squad accountability
-          </p>
         </div>
 
         <button
@@ -323,7 +335,7 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
         )}
       </div>
 
-      {/* Sleek Minimalist 3-Tab Navigator: Challenges, Squad Status, Manage Squads */}
+      {/* Sleek Minimalist 3-Tab Navigator: Challenges, Squad Chat, Manage Squads */}
       <div className="grid grid-cols-3 gap-1.5 p-1.5 bg-[#090C13] border border-[#1C2230] rounded-2xl mb-4 shadow-sm">
         <button
           type="button"
@@ -340,15 +352,15 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
 
         <button
           type="button"
-          onClick={() => setViewMode('squad_status')}
+          onClick={() => setViewMode('squad_chat')}
           className={`py-2 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
-            viewMode === 'squad_status'
+            viewMode === 'squad_chat'
               ? 'border-[#2166FF] bg-[#2166FF]/20 text-white font-bold shadow-sm shadow-[#2166FF]/30 ring-1 ring-[#2166FF]'
               : 'border-[#1C2230] bg-[#121620]/60 text-[#8A92A6] hover:text-white hover:border-[#2C364D]'
           }`}
         >
-          <Activity size={13} className={viewMode === 'squad_status' ? 'text-[#3B82FF]' : 'text-[#8A92A6]'} />
-          <span>Squad Status</span>
+          <MessageSquare size={13} className={viewMode === 'squad_chat' ? 'text-[#3B82FF]' : 'text-[#8A92A6]'} />
+          <span>Squad Chat</span>
         </button>
 
         <button
@@ -365,222 +377,194 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
         </button>
       </div>
 
-      {/* ================= 1. SQUAD STATUS VIEW ================= */}
-      {viewMode === 'squad_status' ? (
+      {/* ================= 1. SQUAD CHAT VIEW ================= */}
+      {viewMode === 'squad_chat' ? (
         <div className="space-y-4 animate-fade-in">
           {/* Section Subheader */}
           <div className="flex items-center justify-between pb-1">
             <div>
               <h2 className="text-xs font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
-                <BarChart3 size={14} className="text-[#3B82FF]" />
-                <span>Daily Squad Check-In Progress</span>
+                <MessageSquare size={14} className="text-[#3B82FF]" />
+                <span>Squad Team Chat</span>
               </h2>
               <p className="text-[11px] text-[#8A92A6]">
-                Percentage of members in each squad who completed their daily check-in
+                Dedicated private discussion rooms for formed squad cohorts to strategize and support each other
               </p>
             </div>
             <span className="text-[10px] font-mono text-[#3B82FF] bg-[#2166FF]/10 px-2 py-0.5 rounded-full border border-[#2166FF]/20">
-              Live Tracker
+              Live Squad Chat
             </span>
           </div>
 
-          {squads.map((squad) => {
-            const squadCh = challenges.find((challenge) => challenge.id === squad.challengeId);
-            const rawMembers = squad.members || [];
-            const hasCreatorInRoster = rawMembers.some(m =>
-              (squad.creator?.username && m.username?.toLowerCase() === squad.creator.username.toLowerCase()) ||
-              (squad.creator?.name && m.name === squad.creator.name && m.role === 'creator')
-            );
-            const members = hasCreatorInRoster ? rawMembers : [
-              {
-                id: `u_${squad.creator?.username || 'leader'}`,
-                name: squad.creator?.name || 'Squad Lead',
-                username: squad.creator?.username || 'leader',
-                avatar: squad.creator?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-                dayReached: 1,
-                role: 'creator' as const,
-              },
-              ...rawMembers
-            ];
-            const checkedInList = squadCheckedInMap[squad.id] || members.slice(0, Math.max(1, members.length - 1)).map(m => m.username);
-            const checkedInCount = members.filter(m => checkedInList.includes(m.username)).length;
-            const totalMembers = members.length;
-            const checkInPercent = totalMembers > 0 ? Math.round((checkedInCount / totalMembers) * 100) : 0;
-            
-            const failedList = squadFailedMembers[squad.id] || [];
-            const hasStreakBroken = failedList.length > 0;
-            const isFullCheckIn = checkInPercent === 100 && !hasStreakBroken;
-
-            return (
-              <div 
-                key={squad.id}
-                className="p-4 rounded-2xl bg-[#090C13] border border-[#1C2230] hover:border-[#2166FF]/30 transition-all space-y-3.5"
-              >
-                {/* Squad Meta Top Row */}
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-10 h-10 rounded-xl bg-[#121622] border border-[#202738] flex items-center justify-center shrink-0">
-                      {getChallengeIcon(squadCh?.icon || 'runner')}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-sm font-bold text-white truncate">
-                          {squad.name}
-                        </h3>
-                        <span className="text-[10px] font-semibold text-[#3B82FF] bg-[#2166FF]/15 px-2 py-0.5 rounded-full border border-[#2166FF]/20">
-                          {squad.category}
-                        </span>
-                      </div>
-                      <p className="text-xs text-[#8A92A6] truncate mt-0.5">
-                        Sprint: <span className="text-white font-medium">{squad.challengeTitle || squadCh?.title}</span>
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => onOpenCohortDiscussions(squadCh, 'detail')}
-                    className="px-3 py-1.5 rounded-xl bg-[#141926] hover:bg-[#2166FF] text-[#8A92A6] hover:text-white text-xs font-semibold flex items-center gap-1.5 border border-[#202738] hover:border-transparent transition-all cursor-pointer shrink-0"
-                  >
-                    <MessageSquare size={13} className="text-[#3B82FF]" />
-                    <span>Chat</span>
-                  </button>
-                </div>
-
-                {/* SQUAD DAILY CHECK-IN PROGRESS BAR */}
-                <div className="p-3 rounded-xl bg-[#0E121B] border border-[#1A202C] space-y-2">
-                  <div className="flex items-center justify-between text-xs font-mono">
-                    <span className="text-white font-semibold flex items-center gap-1.5">
-                      <span className={isFullCheckIn ? 'text-emerald-400' : hasStreakBroken ? 'text-red-400' : 'text-[#3B82FF]'}>
-                        {checkedInCount} / {totalMembers} Members Checked In
-                      </span>
-                    </span>
-                    <span className={`font-bold text-xs ${
-                      hasStreakBroken 
-                        ? 'text-red-400' 
-                        : isFullCheckIn 
-                        ? 'text-emerald-400' 
-                        : 'text-[#3B82FF]'
-                    }`}>
-                      {checkInPercent}%
-                    </span>
-                  </div>
-
-                  {/* Visual Progress Bar */}
-                  <div className="w-full h-2.5 bg-[#080B10] rounded-full overflow-hidden border border-[#202738]/80">
-                    <div 
-                      className={`h-full rounded-full transition-all duration-500 ${
-                        hasStreakBroken 
-                          ? 'bg-red-500' 
-                          : isFullCheckIn 
-                          ? 'bg-gradient-to-r from-[#2166FF] to-emerald-400' 
-                          : 'bg-gradient-to-r from-[#2166FF] to-[#3B82FF]'
-                      }`}
-                      style={{ width: `${checkInPercent}%` }}
-                    />
-                  </div>
-
-                  {/* Status Indicator text */}
-                  <div className="flex items-center justify-between text-[11px] pt-0.5">
-                    {hasStreakBroken ? (
-                      <span className="text-red-400 flex items-center gap-1 font-medium">
-                        <AlertTriangle size={12} /> Missed check-in detected! Day returned to 0
-                      </span>
-                    ) : isFullCheckIn ? (
-                      <span className="text-emerald-400 flex items-center gap-1 font-medium">
-                        <CheckCircle2 size={12} /> 100% check-in achieved! Squad streak safe
-                      </span>
-                    ) : (
-                      <span className="text-[#8A92A6] flex items-center gap-1">
-                        <Clock size={12} className="text-[#3B82FF]" />
-                        {totalMembers - checkedInCount} member{totalMembers - checkedInCount > 1 ? 's' : ''} pending check-in today
-                      </span>
-                    )}
-
-                    <span className="text-[10px] text-[#8A92A6] font-mono">
-                      Day {hasStreakBroken ? 0 : (squadCh?.current || 1)} / {squadCh?.target || 30}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Member Check-In Status (Verified photo required) */}
-                <div>
-                  <div className="flex items-center justify-between text-[11px] text-[#8A92A6] mb-2 font-medium">
-                    <span>Squad Member Status:</span>
-                    <span className="text-[10px] text-[#8A92A6]">Requires verified photo</span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                    {members.map((member) => {
-                      const isCheckedIn = checkedInList.includes(member.username);
-                      const isSelf = member.username === currentUser?.username;
-                      return (
-                        <div
-                          key={member.id}
-                          className={`p-2 rounded-xl border flex items-center justify-between transition-all ${
-                            isCheckedIn
-                              ? 'bg-[#101622] border-emerald-500/30 text-white'
-                              : 'bg-[#0E121B] border-[#1C2230] text-[#8A92A6]'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className="relative shrink-0">
-                              <img
-                                src={member.avatar}
-                                alt={member.name}
-                                className="w-7 h-7 rounded-full object-cover border border-[#202738]"
-                              />
-                              <div className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center text-[9px] font-bold ${
-                                isCheckedIn ? 'bg-emerald-500 text-black' : 'bg-[#1C2230] text-[#8A92A6]'
-                              }`}>
-                                {isCheckedIn ? '✓' : '•'}
-                              </div>
-                            </div>
-                            <div className="min-w-0 text-left">
-                              <p className="text-xs font-semibold truncate leading-tight text-white">{member.name}</p>
-                              <p className="text-[10px] text-[#8A92A6] font-mono truncate">@{member.username}</p>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {isSelf && !isCheckedIn && squadCh && (
-                              <button
-                                type="button"
-                                onClick={() => onSelectChallenge(squadCh)}
-                                className="px-2 py-0.5 rounded-lg bg-[#2166FF] hover:bg-[#3B82FF] text-[10px] text-white font-semibold cursor-pointer shadow-sm"
-                              >
-                                Check In
-                              </button>
-                            )}
-                            <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-medium ${
-                              isCheckedIn
-                                ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                                : 'bg-[#141824] text-[#8A92A6] border border-[#202738]'
-                            }`}>
-                              {isCheckedIn ? 'Photo Verified' : 'Pending Photo'}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-
-          {squads.length === 0 && (
-            <div className="py-12 text-center text-[#8A92A6] bg-[#090C13] rounded-2xl border border-[#1C2230]">
-              <Users size={28} className="mx-auto text-[#2166FF] mb-2 opacity-60" />
-              <p className="text-xs font-semibold text-white mb-1">No Squads Available</p>
-              <p className="text-[11px] text-[#8A92A6] mb-3">Create a squad in Manage Squads to track daily team check-in percentages.</p>
+          {squads.length === 0 ? (
+            <div className="py-14 text-center text-[#8A92A6] bg-[#090C13] rounded-2xl border border-[#1C2230] p-6 space-y-3">
+              <Users size={32} className="mx-auto text-[#2166FF] opacity-70" />
+              <p className="text-sm font-bold text-white">No Squads Formed Yet</p>
+              <p className="text-xs text-[#8A92A6] max-w-sm mx-auto leading-relaxed">
+                Squads provide dedicated team chats to coordinate daily photo check-ins and maintain mutual accountability.
+              </p>
               <button
                 type="button"
                 onClick={() => setViewMode('manage_squads')}
-                className="px-3.5 py-1.5 rounded-xl bg-[#2166FF] text-white text-xs font-semibold cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-[#2166FF] hover:bg-[#1a52cc] text-white text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-md shadow-[#2166FF]/25"
               >
-                Go to Manage Squads
+                <Plus size={13} />
+                <span>Create or Join a Squad</span>
               </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {/* Squad Selector Carousel/Pills */}
+              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+                {squads.map((squad) => {
+                  const isSelected = selectedSquadIdForChat === squad.id;
+                  const memberCount = (squad.members || []).length + (squad.creator ? 1 : 0);
+                  return (
+                    <button
+                      key={squad.id}
+                      type="button"
+                      onClick={() => setSelectedSquadIdForChat(squad.id)}
+                      className={`px-3 py-2 rounded-xl border text-xs font-semibold whitespace-nowrap flex items-center gap-2 transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-[#2166FF] text-white border-[#2166FF] shadow-md shadow-[#2166FF]/25'
+                          : 'bg-[#090C13] border-[#1C2230] text-[#8A92A6] hover:text-white hover:border-[#2C364D]'
+                      }`}
+                    >
+                      <Users size={12} className={isSelected ? 'text-white' : 'text-[#3B82FF]'} />
+                      <span>{squad.name}</span>
+                      <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+                        isSelected ? 'bg-white/20 text-white' : 'bg-[#141926] text-[#8A92A6]'
+                      }`}>
+                        {memberCount}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Active Squad Chat Window */}
+              {(() => {
+                const activeSquad = squads.find(s => s.id === selectedSquadIdForChat) || squads[0];
+                if (!activeSquad) return null;
+                const squadCh = challenges.find(c => c.id === activeSquad.challengeId);
+                const activeSquadMembers = (activeSquad.members || []);
+
+                return (
+                  <div className="rounded-2xl bg-[#090C13] border border-[#1C2230] overflow-hidden flex flex-col shadow-xl">
+                    {/* Squad Chat Header */}
+                    <div className="p-3.5 border-b border-[#1C2230] bg-[#0c1017] flex items-center justify-between gap-3 flex-wrap">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-9 h-9 rounded-xl bg-[#121622] border border-[#202738] flex items-center justify-center text-[#3B82FF] shrink-0">
+                          <Users size={16} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-xs font-bold text-white truncate">{activeSquad.name}</h3>
+                            <span className="text-[10px] font-mono px-2 py-0.2 rounded-full bg-[#2166FF]/20 text-[#3B82FF] border border-[#2166FF]/30 uppercase">
+                              {activeSquad.category}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-[#8A92A6] truncate mt-0.5">
+                            Challenge: <span className="text-white font-medium">{activeSquad.challengeTitle || squadCh?.title || 'Daily Sprint'}</span>
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Members Avatars Row */}
+                      <div className="flex items-center -space-x-1.5 overflow-hidden">
+                        {activeSquadMembers.slice(0, 5).map((m, idx) => (
+                          <img
+                            key={idx}
+                            src={m.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80'}
+                            alt={m.name}
+                            title={`${m.name} (@${m.username})`}
+                            className="w-6 h-6 rounded-full object-cover border-2 border-[#090C13]"
+                          />
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Messages Scroll Area */}
+                    <div className="p-4 space-y-3 min-h-[260px] max-h-[380px] overflow-y-auto bg-[#06080D]">
+                      {squadChatMessages.length === 0 ? (
+                        <div className="py-12 text-center text-[#8A92A6] space-y-2">
+                          <Sparkles size={24} className="mx-auto text-[#2166FF] opacity-60" />
+                          <p className="text-xs font-semibold text-white">Squad Channel Ready</p>
+                          <p className="text-[11px] text-[#8A92A6] max-w-xs mx-auto">
+                            Send the first message to coordinate today&apos;s photo check-in, set workout times, or share daily goals!
+                          </p>
+                        </div>
+                      ) : (
+                        squadChatMessages.map((msg) => {
+                          const author = msg.author || (msg.sender
+                            ? {
+                                id: msg.sender.id,
+                                name: msg.sender.name,
+                                username: msg.sender.username,
+                                avatar: msg.sender.avatar,
+                              }
+                            : {
+                                id: '',
+                                name: 'Unknown member',
+                                username: 'unknown',
+                                avatar: '',
+                              });
+                          const isMe = author.username === currentUser?.username;
+                          return (
+                            <div
+                              key={msg.id}
+                              className={`flex items-start gap-2.5 ${isMe ? 'flex-row-reverse' : ''}`}
+                            >
+                              <img
+                                src={author.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80'}
+                                alt={author.name}
+                                className="w-7 h-7 rounded-full object-cover border border-[#202738] shrink-0 mt-0.5"
+                              />
+                              <div className={`max-w-[80%] space-y-1 ${isMe ? 'items-end' : ''}`}>
+                                <div className={`flex items-center gap-1.5 text-[10px] ${isMe ? 'justify-end' : ''}`}>
+                                  <span className="font-bold text-white">{isMe ? 'You' : author.name}</span>
+                                  <span className="text-[#8A92A6] font-mono">@{author.username}</span>
+                                  <span className="text-[#8A92A6]">·</span>
+                                  <span className="text-[#8A92A6] font-mono">{msg.timestamp}</span>
+                                </div>
+                                <div className={`p-3 rounded-2xl text-xs leading-relaxed ${
+                                  isMe
+                                    ? 'bg-[#2166FF] text-white rounded-tr-sm'
+                                    : 'bg-[#121620] text-gray-200 border border-[#1C2230] rounded-tl-sm'
+                                }`}>
+                                  {msg.text}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {/* Chat Input Bar */}
+                    <form
+                      onSubmit={handleSendSquadMessage}
+                      className="p-3 border-t border-[#1C2230] bg-[#0c1017] flex items-center gap-2"
+                    >
+                      <input
+                        type="text"
+                        value={chatInputText}
+                        onChange={(e) => setChatInputText(e.target.value)}
+                        placeholder={`Message #${activeSquad.name.toLowerCase().replace(/\s+/g, '-')}...`}
+                        className="flex-1 bg-[#10141D] border border-[#1C2230] focus:border-[#2166FF] rounded-xl px-3 py-2 text-xs text-white placeholder-[#8A92A6] outline-none transition-colors"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!chatInputText.trim()}
+                        className="px-3.5 py-2 rounded-xl bg-[#2166FF] hover:bg-[#1a55d6] disabled:opacity-40 text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
+                      >
+                        <Send size={13} />
+                        <span>Send</span>
+                      </button>
+                    </form>
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
@@ -633,9 +617,7 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
             const isEntered = entrySession?.status === 'entered' || squadCh?.joined;
             const acceptedCount = entrySession?.acceptedUsernames.length || 0;
 
-            const failedList = squadFailedMembers[squad.id] || [];
-            const hasMissed = failedList.length > 0;
-            const currentDay = hasMissed ? 0 : (squadCh?.current || 1);
+            const currentDay = squadCh?.current || 1;
 
             return (
               <div key={squad.id} className="p-4 sm:p-5 rounded-2xl bg-[#080B10] border border-[#1C2230] space-y-4 hover:border-[#2166FF]/30 transition-all shadow-sm">
@@ -654,8 +636,8 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                           {squad.category}
                         </span>
                       </div>
-                      <p className="text-[11px] text-[#8A92A6] mt-0.5 truncate">
-                        Sprint: <span className="text-white font-medium">{squadCh?.title || squad.challengeTitle || 'Daily Sprint'}</span>
+                      <p className="text-[11px] text-[#8A92A6] mt-0.5 break-words">
+                        {squadCh?.title || squad.challengeTitle || 'Challenge'}
                       </p>
                     </div>
                   </div>
@@ -698,7 +680,7 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                 </div>
 
                 {/* 3 Metric Tiles Grid */}
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <div className="p-2.5 rounded-xl bg-[#0E121B] border border-[#1C2230] text-center">
                     <span className="text-[10px] text-[#8A92A6] uppercase tracking-wider block font-semibold">ROSTER</span>
                     <span className={`text-xs font-bold font-mono mt-0.5 block ${isEligible ? 'text-emerald-400' : 'text-amber-400'}`}>
@@ -711,7 +693,7 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
 
                   <div className="p-2.5 rounded-xl bg-[#0E121B] border border-[#1C2230] text-center">
                     <span className="text-[10px] text-[#8A92A6] uppercase tracking-wider block font-semibold">DAY</span>
-                    <span className={`text-xs font-bold font-mono mt-0.5 block ${hasMissed ? 'text-red-400' : 'text-white'}`}>
+                    <span className="text-xs font-bold font-mono mt-0.5 block text-white">
                       Day {currentDay}
                     </span>
                     <span className="text-[9px] text-[#8A92A6] block mt-0.5 truncate">
@@ -719,17 +701,6 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                     </span>
                   </div>
 
-                  <div className="p-2.5 rounded-xl bg-[#0E121B] border border-[#1C2230] text-center">
-                    <span className="text-[10px] text-[#8A92A6] uppercase tracking-wider block font-semibold">STATUS</span>
-                    <span className={`text-xs font-bold font-mono mt-0.5 block truncate ${
-                      isEntered ? 'text-emerald-400' : isEligible ? 'text-[#3B82FF]' : 'text-amber-400'
-                    }`}>
-                      {isEntered ? 'Active' : isEligible ? 'Ready' : 'Recruiting'}
-                    </span>
-                    <span className="text-[9px] text-[#8A92A6] block mt-0.5 truncate">
-                      {isEntered ? 'In Sprint' : 'Pre-Sprint'}
-                    </span>
-                  </div>
                 </div>
 
                 {/* Eligibility Callout or Entry Action */}
@@ -831,25 +802,6 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                   </div>
                 )}
 
-                {/* SQUAD ZERO-FAILURE RULE BANNER */}
-                <div className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2 ${
-                  hasMissed ? 'bg-red-500/10 border-red-500/30 text-red-300' : 'bg-[#10141E] border-[#1C2230] text-[#8A92A6]'
-                }`}>
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <AlertTriangle size={13} className={hasMissed ? 'text-red-400' : 'text-amber-400'} />
-                    <span className="truncate">
-                      {hasMissed 
-                        ? `Streak broken! ${failedList.join(', ')} missed proof. Day reset to 0.`
-                        : `Squad Rule: Zero missed photos allowed or progress returns to 0.`}
-                    </span>
-                  </div>
-                  {hasMissed && (
-                    <span className="text-[10px] font-bold text-red-400 font-mono shrink-0">
-                      DAY 0
-                    </span>
-                  )}
-                </div>
-
                 {/* Clean Members Roster */}
                 <div>
                   <div className="flex items-center justify-between text-[11px] font-semibold text-[#8A92A6] uppercase tracking-wider mb-2">
@@ -858,16 +810,10 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {members.map((member) => {
-                      const isFailed = failedList.includes(member.username);
-                      return (
+                    {members.map((member) => (
                         <div
                           key={member.id}
-                          className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 transition-colors ${
-                            isFailed 
-                              ? 'bg-red-950/20 border-red-500/30' 
-                              : 'bg-[#0E121B] border-[#1C2230]'
-                          }`}
+                          className="p-2.5 rounded-xl border flex items-center justify-between gap-2 transition-colors bg-[#0E121B] border-[#1C2230]"
                         >
                           <div 
                             onClick={() => onNavigateUser({ name: member.name, username: member.username })}
@@ -876,9 +822,7 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                             <img
                               src={member.avatar}
                               alt={member.name}
-                              className={`w-7 h-7 rounded-full object-cover border shrink-0 ${
-                                isFailed ? 'border-red-500' : 'border-[#202738] group-hover:border-[#2166FF]'
-                              }`}
+                              className="w-7 h-7 rounded-full object-cover border border-[#202738] group-hover:border-[#2166FF] shrink-0"
                               referrerPolicy="no-referrer"
                             />
                             <div className="min-w-0">
@@ -897,12 +841,8 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                           </div>
 
                           <div className="flex items-center gap-1.5 shrink-0">
-                            <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${
-                              isFailed 
-                                ? 'bg-red-500/20 text-red-300 border border-red-500/30 font-bold' 
-                                : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                            }`}>
-                              {isFailed ? 'Missed' : 'Active'}
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                              Member
                             </span>
 
                             {member.username !== currentUser?.username && onToggleFollow && (
@@ -920,8 +860,7 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                             )}
                           </div>
                         </div>
-                      );
-                    })}
+                    ))}
                   </div>
                 </div>
               </div>
@@ -959,9 +898,9 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
 
 
 
-          {/* Segmented Filter Pills */}
-          <div className="flex items-center justify-between gap-2 overflow-x-auto no-scrollbar pb-0.5">
-            <div className="grid grid-cols-4 gap-1 p-1 bg-[#090C13] border border-[#1C2230] rounded-xl flex-1 min-w-[280px]">
+          {/* Segmented Filter Pills & Sort Selector */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pb-0.5">
+            <div className="grid grid-cols-4 gap-1 p-1 bg-[#090C13] border border-[#1C2230] rounded-xl flex-1 min-w-[260px]">
               <button
                 onClick={() => setActiveFilter('all')}
                 className={`py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
@@ -998,19 +937,36 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                 <span>Joined</span>
               </button>
             </div>
+
+            {/* Sort Menu: Recently Added | Popularity | Difficulty */}
+            <div className="flex items-center gap-1 p-1 bg-[#090C13] border border-[#1C2230] rounded-xl self-end sm:self-auto text-xs">
+              <span className="text-[10px] text-[#8A92A6] px-1 font-mono uppercase">Sort:</span>
+              {(['recent', 'popularity', 'difficulty'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setSortBy(mode)}
+                  className={`px-2 py-0.5 rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
+                    sortBy === mode
+                      ? 'bg-[#2166FF] text-white font-semibold shadow-sm'
+                      : 'text-[#8A92A6] hover:text-white'
+                  }`}
+                >
+                  {mode === 'recent' ? 'Recently Added' : mode === 'popularity' ? 'Popularity' : 'Difficulty'}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Minimalist Challenge Cards */}
           <div className="space-y-3.5">
-            {filteredChallenges.map((challenge) => {
+            {sortedChallenges.map((challenge) => {
               const progressPercent = Math.min(
                 100,
                 Math.round((challenge.current / challenge.target) * 100)
               );
               const isInToDo = toDoChallengeIds.includes(challenge.id);
-              const failedMembers = squadFailedMembers[challenge.id] || [];
-              const isStreakBroken = challenge.type === 'squad' && failedMembers.length > 0;
-              const effectiveCurrent = isStreakBroken ? 0 : challenge.current;
+              const difficulty = getChallengeDifficulty(challenge);
 
               return (
                 <div
@@ -1030,6 +986,15 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                           {challenge.tags[0]}
                         </span>
                       )}
+                      <span className={`px-2 py-0.5 rounded-full border text-[10px] font-semibold ${
+                        difficulty === 'Easy'
+                          ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
+                          : difficulty === 'Medium'
+                            ? 'bg-amber-500/10 border-amber-500/25 text-amber-300'
+                            : 'bg-rose-500/10 border-rose-500/25 text-rose-300'
+                      }`}>
+                        {difficulty}
+                      </span>
                     </div>
 
                     <div className="flex items-center gap-1.5 text-[#8A92A6] font-mono text-[10px]">
@@ -1037,7 +1002,7 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                       <span>{challenge.durationDays || challenge.target}d</span>
                       <span>•</span>
                       <Users size={11} />
-                      <span>{challenge.participantsCount || 3} joined</span>
+                      <span>{challenge.participantsCount ?? (challenge.joined ? 1 : 0)} joined</span>
                     </div>
                   </div>
 
@@ -1052,8 +1017,9 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
 
                     <div className="flex-1 min-w-0">
                       <h3 
-                        onClick={() => onSelectChallenge(challenge)}
-                        className="text-sm font-bold text-white hover:text-[#3B82FF] transition-colors cursor-pointer truncate"
+                        onClick={() => setRuleModalChallenge(challenge)}
+                        className="text-sm font-bold text-white hover:text-[#3B82FF] transition-colors cursor-pointer leading-snug"
+                        title="Click to view Squad Accountability Rule"
                       >
                         {challenge.title}
                       </h3>
@@ -1099,10 +1065,16 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                   </div>
 
                   {/* Minimalist WHAT YOU PERFORM Quote Accent */}
-                  {challenge.whatYouPerform && (
+                  {challenge.description && (
+                    <p className="text-xs text-[#A8B2C2] leading-relaxed whitespace-pre-wrap break-words">
+                      {challenge.description}
+                    </p>
+                  )}
+
+                  {challenge.whatYouPerform && challenge.whatYouPerform !== challenge.description && (
                     <div 
                       onClick={() => onSelectChallenge(challenge)}
-                      className="border-l-2 border-[#2166FF]/60 pl-3 py-0.5 text-xs text-[#A8B2C2] leading-relaxed cursor-pointer hover:text-white transition-colors"
+                      className="border-l-2 border-[#2166FF]/60 pl-3 py-0.5 text-xs text-[#A8B2C2] leading-relaxed whitespace-pre-wrap break-words cursor-pointer hover:text-white transition-colors"
                     >
                       {challenge.whatYouPerform}
                     </div>
@@ -1111,20 +1083,18 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                   {/* Minimalist Progress Bar */}
                   <div>
                     <div className="flex items-center justify-between text-xs text-[#8A92A6] font-mono mb-1">
-                      <span className={isStreakBroken ? 'text-red-400 font-semibold' : 'text-white'}>
-                        Day {effectiveCurrent} of {challenge.target}
+                      <span className="text-white">
+                        Day {challenge.current} of {challenge.target}
                       </span>
-                      <span className={isStreakBroken ? 'text-red-400 font-bold' : 'text-[#3B82FF] font-bold'}>
-                        {isStreakBroken ? '0%' : `${progressPercent}%`}
+                      <span className="text-[#3B82FF] font-bold">
+                        {progressPercent}%
                       </span>
                     </div>
 
                     <div className="w-full h-1.5 bg-[#121622] rounded-full overflow-hidden border border-[#202738]">
                       <div
-                        className={`h-full transition-all duration-500 rounded-full ${
-                          isStreakBroken ? 'bg-red-500' : 'bg-[#2166FF]'
-                        }`}
-                        style={{ width: `${isStreakBroken ? 0 : progressPercent}%` }}
+                        className="h-full transition-all duration-500 rounded-full bg-[#2166FF]"
+                        style={{ width: `${progressPercent}%` }}
                       />
                     </div>
                   </div>
@@ -1254,7 +1224,7 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                 >
                   {challenges.map((c) => (
                     <option key={c.id} value={c.id} className="bg-[#121622]">
-                      {c.title} ({c.type === 'squad' ? 'Squad Sprint' : 'Solo'})
+                      {c.title} ({c.type === 'squad' ? 'Squad' : 'Solo'})
                     </option>
                   ))}
                 </select>
@@ -1523,6 +1493,85 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                 className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 active:scale-95 text-xs font-semibold text-white transition-all cursor-pointer shadow-md shadow-red-600/30"
               >
                 Yes, Delete Challenge
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* SQUAD ACCOUNTABILITY RULE MODAL */}
+      {ruleModalChallenge && (
+        <div 
+          onClick={() => setRuleModalChallenge(null)}
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md bg-[#090C13] border border-[#1C2230] rounded-t-3xl sm:rounded-3xl p-5 space-y-4 shadow-2xl animate-slide-up"
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-[#1C2230]">
+              <div className="flex items-center gap-2 text-white font-bold text-sm">
+                <ShieldCheck size={18} className="text-[#3B82FF]" />
+                <span>{ruleModalChallenge.type === 'squad' ? 'Squad Accountability Rule' : 'Challenge Details'}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRuleModalChallenge(null)}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-[#8A92A6] hover:text-white hover:bg-[#121622] transition-colors cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div>
+              <h4 className="text-base font-bold text-white mb-1 leading-snug">
+                {ruleModalChallenge.title}
+              </h4>
+              <p className="text-xs text-[#8A92A6]">
+                Target: {ruleModalChallenge.target} Days • {ruleModalChallenge.type === 'squad' ? 'Squad Challenge' : 'Solo Challenge'}
+              </p>
+            </div>
+
+            <p className="text-xs text-[#A8B2C2] leading-relaxed whitespace-pre-wrap break-words">
+              {ruleModalChallenge.description}
+            </p>
+
+            {ruleModalChallenge.type === 'squad' && (
+              <>
+                <div className="p-3.5 rounded-2xl bg-red-500/10 border border-red-500/25 space-y-2">
+                  <div className="flex items-center gap-2 text-red-400 font-bold text-xs">
+                    <AlertTriangle size={15} />
+                    <span>THE ZERO-FAILURE PRINCIPLE</span>
+                  </div>
+                  <p className="text-xs text-red-200/90 leading-relaxed">
+                    Every squad member must submit a verified daily photo proof before midnight. If one person misses a day, the squad restarts together.
+                  </p>
+                </div>
+
+                <div className="space-y-2 text-xs text-[#A8B2C2]">
+                  <div className="flex items-start gap-2">
+                    <span className="w-5 h-5 rounded-full bg-[#2166FF]/20 text-[#3B82FF] flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">1</span>
+                    <span>Challenge moderators verify daily photo evidence before it appears in the cohort feed.</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="w-5 h-5 rounded-full bg-[#2166FF]/20 text-[#3B82FF] flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">2</span>
+                    <span>Support your teammates and maintain collective discipline throughout the challenge.</span>
+                  </div>
+                </div>
+              </>
+            )}
+
+            <div className="pt-2 flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const ch = ruleModalChallenge;
+                  setRuleModalChallenge(null);
+                  onSelectChallenge(ch);
+                }}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-[#2166FF] hover:bg-[#1a55d6] text-white text-xs font-bold transition-all cursor-pointer shadow-md shadow-[#2166FF]/25 flex items-center justify-center gap-1.5"
+              >
+                <span>View Full Challenge Details</span>
+                <ChevronRight size={14} />
               </button>
             </div>
           </div>

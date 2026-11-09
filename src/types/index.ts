@@ -64,6 +64,21 @@ export interface CohortProof {
   timestamp: string;
   likesCount: number;
   isLiked?: boolean;
+  verified?: boolean;
+}
+
+export interface SquadChatMessage {
+  id: string;
+  squadId: string;
+  author?: Author;
+  sender?: {
+    id: string;
+    name: string;
+    username: string;
+    avatar: string;
+  };
+  text: string;
+  timestamp: string;
 }
 
 export interface Author {
@@ -86,9 +101,6 @@ export interface Comment {
   text: string;
   timestamp: string;
   likes: number;
-  upvotes?: number;
-  downvotes?: number;
-  userVote?: 'up' | 'down' | null;
 }
 
 export interface Post {
@@ -132,6 +144,8 @@ export interface Challenge {
   title: string;
   description: string;
   whatYouPerform?: string;
+  difficulty?: 'Easy' | 'Medium' | 'Hard';
+  createdAt?: string;
   current: number;
   target: number;
   unit?: string;
@@ -146,6 +160,7 @@ export interface Challenge {
   squadMembers?: SquadMember[];
   squadProofs?: CohortProof[];
   creator?: {
+    id?: string;
     name: string;
     username: string;
     avatar?: string;

@@ -60,20 +60,25 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
   const [authProvider, setAuthProvider] = useState<'google' | 'email' | 'guest'>('email');
   const [cameFromDirectLogin, setCameFromDirectLogin] = useState(false);
 
-  // Screen 2: Name, username, bio, avatar state
+  // Screen 2: Name, username, bio, avatar, banner state
   const [name, setName] = useState(initialUser?.name || '');
   const [username, setUsername] = useState(initialUser?.username || '');
   const [bio, setBio] = useState(initialUser?.bio || '');
   const [avatarUrl, setAvatarUrl] = useState<string>(
     initialUser?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80'
   );
+  const [bannerUrl, setBannerUrl] = useState<string>(
+    initialUser?.bannerUrl || 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=1200&auto=format&fit=crop&q=80'
+  );
   const [userId, setUserId] = useState<string>(initialUser?.id || `user_${Date.now()}`);
   const [googleUserNote, setGoogleUserNote] = useState<string | null>(null);
 
-  // Avatar upload and cropping state
+  // Avatar and Banner upload and cropping state
   const [isCropModalOpen, setIsCropModalOpen] = useState(false);
   const [rawImageForCrop, setRawImageForCrop] = useState<string>('');
+  const [cropTarget, setCropTarget] = useState<'avatar' | 'banner'>('avatar');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const bannerInputRef = useRef<HTMLInputElement>(null);
 
   // Real-time unique username validation state
   const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'available' | 'taken' | 'invalid'>('idle');
@@ -119,20 +124,27 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
         const meta = u.user_metadata || {};
         const provider = (u.app_metadata?.provider as any) || 'google';
 
-        // Check if user already has an existing profile in public.profiles table
+        // Check if user already has an existing completed profile in public.profiles table
         const { data: dbProfile } = await supabase
           .from('profiles')
           .select('*')
           .eq('id', u.id)
           .maybeSingle();
 
-        if (dbProfile && (dbProfile.username || meta.onboarding_completed)) {
+        const hasFinishedOnboarding = Boolean(
+          dbProfile?.username &&
+          dbProfile.username !== 'builder' &&
+          (meta.onboarding_completed || dbProfile.updated_at !== dbProfile.created_at)
+        );
+
+        if (dbProfile && hasFinishedOnboarding) {
           // User already has an account! Load that specific account and redirect immediately to the main app!
           const loadedUser: Author = {
             id: u.id,
             name: dbProfile.name || meta.name || 'Daily Builder',
-            username: dbProfile.username || 'builder',
+            username: dbProfile.username,
             avatar: dbProfile.avatar_url || meta.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+            bannerUrl: dbProfile.banner_url || meta.banner_url || 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=1200&auto=format&fit=crop&q=80',
             bio: dbProfile.bio || '',
             isCurrentUser: true,
             followersCount: dbProfile.followers_count || 0,
@@ -150,9 +162,11 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
         const derivedName = meta.name || meta.full_name || u.email?.split('@')[0] || '';
         const rawHandle = meta.username || u.email?.split('@')[0]?.toLowerCase().replace(/[^a-z0-9_.]/g, '') || '';
         const derivedAvatar = meta.avatar_url || '';
+        const derivedBanner = meta.banner_url || '';
 
         if (derivedName) setName(derivedName);
         if (derivedAvatar) setAvatarUrl(derivedAvatar);
+        if (derivedBanner) setBannerUrl(derivedBanner);
         setEmail(u.email || '');
         setAuthProvider(provider);
 
@@ -165,7 +179,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
           checkUsernameAvailability(rawHandle, u.id);
         }
 
-        // Advance to Step 'profile' to prompt for custom Name, Username, and Bio for new signups
+        // Advance to Step 'profile' to prompt for custom Name, Username, Avatar, Banner, and Bio for new signups
         setStep('profile');
       }
     });
@@ -338,37 +352,60 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
 
         if (data?.user) {
           const u = data.user;
-          // Look up user profile to load that specific account and redirect immediately to the main app!
+          setUserId(u.id);
+          // Look up user profile to load that specific account
           const { data: dbProfile } = await supabase
             .from('profiles')
             .select('*')
             .eq('id', u.id)
             .maybeSingle();
 
-          const finalName = dbProfile?.name || u.user_metadata?.name || u.user_metadata?.full_name || email.split('@')[0];
-          const finalUsername = dbProfile?.username || u.user_metadata?.username || email.split('@')[0].toLowerCase().replace(/[^a-z0-9_.]/g, '');
-          const finalAvatar = dbProfile?.avatar_url || u.user_metadata?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80';
-          const finalBio = dbProfile?.bio || u.user_metadata?.bio || 'Building daily consistency and verifiable discipline.';
+          const hasCompletedProfile = Boolean(
+            dbProfile?.username &&
+            dbProfile.username !== 'builder' &&
+            (u.user_metadata?.onboarding_completed || dbProfile.bio || dbProfile.updated_at !== dbProfile.created_at)
+          );
 
-          const loggedInUser: Author = {
-            id: u.id,
-            name: finalName,
-            username: finalUsername,
-            avatar: finalAvatar,
-            bio: finalBio,
-            isCurrentUser: true,
-            isFollowing: false,
-            followersCount: dbProfile?.followers_count || 0,
-            followingCount: dbProfile?.following_count || 0,
-            accountabilityHubPrivacy: (dbProfile?.accountability_hub_privacy as any) || 'public',
-          };
+          if (hasCompletedProfile) {
+            const finalName = dbProfile?.name || u.user_metadata?.name || u.user_metadata?.full_name || email.split('@')[0];
+            const finalUsername = dbProfile?.username || u.user_metadata?.username;
+            const finalAvatar = dbProfile?.avatar_url || u.user_metadata?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80';
+            const finalBanner = dbProfile?.banner_url || u.user_metadata?.banner_url || 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=1200&auto=format&fit=crop&q=80';
+            const finalBio = dbProfile?.bio || u.user_metadata?.bio || 'Building daily consistency and verifiable discipline.';
 
+            const loggedInUser: Author = {
+              id: u.id,
+              name: finalName,
+              username: finalUsername,
+              avatar: finalAvatar,
+              bannerUrl: finalBanner,
+              bio: finalBio,
+              isCurrentUser: true,
+              isFollowing: false,
+              followersCount: dbProfile?.followers_count || 0,
+              followingCount: dbProfile?.following_count || 0,
+              accountabilityHubPrivacy: (dbProfile?.accountability_hub_privacy as any) || 'public',
+            };
+
+            setAuthLoading(false);
+            onComplete(loggedInUser, ['Coding & Tech', 'Startups & SaaS', 'Daily Habits'], {
+              provider: 'email',
+              email: u.email,
+            });
+            return;
+          }
+
+          // Incomplete profile - proceed to step 4 (profile setup)
+          if (dbProfile?.name || u.user_metadata?.name) setName(dbProfile?.name || u.user_metadata?.name);
+          if (dbProfile?.avatar_url || u.user_metadata?.avatar_url) setAvatarUrl(dbProfile?.avatar_url || u.user_metadata?.avatar_url);
+          if (dbProfile?.banner_url || u.user_metadata?.banner_url) setBannerUrl(dbProfile?.banner_url || u.user_metadata?.banner_url);
+          const rawHandle = (dbProfile?.username && dbProfile.username !== 'builder')
+            ? dbProfile.username
+            : email.split('@')[0].toLowerCase().replace(/[^a-z0-9_.]/g, '');
+          setUsername(rawHandle);
+          checkUsernameAvailability(rawHandle, u.id);
+          setStep('profile');
           setAuthLoading(false);
-          // Redirect immediately to the main app!
-          onComplete(loggedInUser, ['Coding & Tech', 'Startups & SaaS', 'Daily Habits'], {
-            provider: 'email',
-            email: u.email,
-          });
           return;
         }
       } else {
@@ -394,14 +431,13 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
         }
 
         if (data?.session && data?.user) {
-          // Immediately confirmed and logged in
+          // Immediately confirmed and logged in - go to profile setup
           setUserId(data.user.id);
           setName(derivedName);
           setUsername(derivedUsername);
           checkUsernameAvailability(derivedUsername, data.user.id);
           setStep('profile');
         } else if (data?.user) {
-          // Email confirmation is required by Supabase project settings
           setUserId(data.user.id);
           setName(derivedName);
           setUsername(derivedUsername);
@@ -417,7 +453,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
     }
   };
 
-  // Screen 2: Finish Onboarding & Save Unique Profile
+  // Screen 2: Finish Onboarding & Save Unique Profile (Name, Username, PFP, Banner, Bio)
   const handleFinish = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -425,6 +461,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
     const finalUsername = username.trim().toLowerCase().replace(/^@/, '');
     const finalBio = bio.trim() || 'Building daily consistency and verifiable discipline.';
     const finalAvatar = avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80';
+    const finalBanner = bannerUrl || 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=1200&auto=format&fit=crop&q=80';
 
     if (!finalUsername) {
       setAuthError('Please choose a valid username handle.');
@@ -440,19 +477,28 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
     setAuthError(null);
 
     let resolvedAvatar = finalAvatar;
+    let resolvedBanner = finalBanner;
 
     try {
       // Re-verify uniqueness against public.profiles right before saving
-      const { data: { session } } = await supabase.auth.getSession();
-      const activeUserId = session?.user?.id || (isValidUUID(userId) ? userId : undefined);
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      const activeUserId = session?.user?.id;
+
+      if (authProvider !== 'guest' && !activeUserId) {
+        setAuthError('Your sign-in session expired. Please sign in again before saving your profile.');
+        setAuthLoading(false);
+        return;
+      }
 
       if (activeUserId) {
-        const { data: existingUser } = await supabase
+        const { data: existingUser, error: usernameError } = await supabase
           .from('profiles')
           .select('id, username')
           .ilike('username', finalUsername)
           .limit(1);
 
+        if (usernameError) throw usernameError;
         if (existingUser && existingUser.length > 0 && existingUser[0].id !== activeUserId) {
           setUsernameStatus('taken');
           setUsernameMessage(`@${finalUsername} is already taken by someone else.`);
@@ -464,47 +510,44 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
 
       // Upload cropped avatar to Supabase Storage if it is a Data URL
       if (finalAvatar.startsWith('data:') && activeUserId) {
-        try {
-          resolvedAvatar = await uploadMediaToSupabase('avatars', finalAvatar, `avatar_${activeUserId}`);
-        } catch {
-          resolvedAvatar = finalAvatar;
-        }
+        resolvedAvatar = await uploadMediaToSupabase('avatars', finalAvatar, `avatar_${activeUserId}`);
+        if (resolvedAvatar.startsWith('data:')) throw new Error('Your profile photo could not be uploaded. Please try another image.');
+      }
+
+      // Upload cropped banner to Supabase Storage if it is a Data URL
+      if (finalBanner.startsWith('data:') && activeUserId) {
+        resolvedBanner = await uploadMediaToSupabase('avatars', finalBanner, `banner_${activeUserId}`);
+        if (resolvedBanner.startsWith('data:')) throw new Error('Your profile banner could not be uploaded. Please try another image.');
       }
 
       // Sync profile to Supabase public.profiles table
       if (activeUserId) {
-        await syncProfileToSupabase({
+        const savedProfile = await syncProfileToSupabase({
           id: activeUserId,
           name: finalName,
           username: finalUsername,
           avatar: resolvedAvatar,
+          bannerUrl: resolvedBanner,
           bio: finalBio,
         });
 
-        // Update user metadata in Supabase Auth (avoid passing huge base64 strings to metadata)
-        const metaUpdate: any = {
-          name: finalName,
-          username: finalUsername,
-          bio: finalBio,
-          onboarding_completed: true,
-        };
-        if (resolvedAvatar.startsWith('http')) {
-          metaUpdate.avatar_url = resolvedAvatar;
-        }
-        await supabase.auth.updateUser({
-          data: metaUpdate,
-        });
+        if (!savedProfile) throw new Error('Your profile could not be saved to your account. Please try again.');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.warn('Profile sync notice:', err);
+      setAuthError(err instanceof Error ? err.message : 'Your profile could not be saved. Please try again.');
+      setAuthLoading(false);
+      return;
     }
 
-    const effectiveId = userId && isValidUUID(userId) ? userId : (initialUser?.id || `user_${Date.now()}`);
+    const { data: { session } } = await supabase.auth.getSession();
+    const effectiveId = session?.user?.id || (authProvider === 'guest' ? `guest_${Date.now()}` : userId);
     const finalUser: Author = {
       id: effectiveId,
       name: finalName,
       username: finalUsername,
       avatar: resolvedAvatar,
+      bannerUrl: resolvedBanner,
       bio: finalBio,
       isCurrentUser: true,
       isFollowing: false,
@@ -1105,6 +1148,65 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
               </div>
             )}
 
+            {/* Banner Preview & Attachment */}
+            <div className="rounded-2xl border border-[#202738] bg-[#121620] overflow-hidden space-y-2 p-2.5">
+              <div className="relative h-24 w-full rounded-xl overflow-hidden bg-[#080B10] border border-[#202738]">
+                <img
+                  src={bannerUrl}
+                  alt="Profile Banner Preview"
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex items-end justify-between p-2.5">
+                  <span className="text-[11px] font-semibold text-white drop-shadow">Profile Banner (1200×400)</span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => bannerInputRef.current?.click()}
+                      className="px-2.5 py-1 rounded-lg bg-black/75 hover:bg-black text-white text-[10px] font-semibold flex items-center gap-1 backdrop-blur-md border border-white/20 transition-all cursor-pointer"
+                    >
+                      <Upload size={11} className="text-[#3B82FF]" />
+                      <span>Attach Banner</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRawImageForCrop(bannerUrl);
+                        setCropTarget('banner');
+                        setIsCropModalOpen(true);
+                      }}
+                      className="px-2 py-1 rounded-lg bg-black/75 hover:bg-black text-white text-[10px] font-semibold flex items-center gap-1 backdrop-blur-md border border-white/20 transition-all cursor-pointer"
+                    >
+                      <Crop size={11} className="text-[#10B981]" />
+                      <span>Crop</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <input
+                ref={bannerInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = (event) => {
+                    const dataUrl = event.target?.result as string;
+                    if (dataUrl) {
+                      setRawImageForCrop(dataUrl);
+                      setCropTarget('banner');
+                      setIsCropModalOpen(true);
+                    }
+                  };
+                  reader.readAsDataURL(file);
+                  e.target.value = '';
+                }}
+              />
+            </div>
+
             {/* Avatar Preview & Attachment / Cropping */}
             <div className="p-3.5 rounded-2xl bg-[#121620] border border-[#202738] space-y-2.5">
               <div className="flex items-center gap-3">
@@ -1117,7 +1219,10 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                   />
                   <button
                     type="button"
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => {
+                      setCropTarget('avatar');
+                      fileInputRef.current?.click();
+                    }}
                     title="Change profile picture"
                     className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity cursor-pointer text-white"
                   >
@@ -1130,7 +1235,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                     @{username || 'handle'}
                   </p>
                   <p className="text-[10px] text-[#717B90]">
-                    Upload custom photo or crop to 1:1 circle
+                    Profile Picture (1:1 circular avatar)
                   </p>
                 </div>
               </div>
@@ -1139,7 +1244,10 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
               <div className="flex items-center gap-2 pt-1 border-t border-[#1C2230]">
                 <button
                   type="button"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => {
+                    setCropTarget('avatar');
+                    fileInputRef.current?.click();
+                  }}
                   className="flex-1 py-1.5 px-2.5 rounded-xl bg-[#181D2A] hover:bg-[#202738] border border-[#2A3348] text-[11px] font-semibold text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <Upload size={13} className="text-[#3B82FF]" />
@@ -1150,6 +1258,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                   type="button"
                   onClick={() => {
                     setRawImageForCrop(avatarUrl);
+                    setCropTarget('avatar');
                     setIsCropModalOpen(true);
                   }}
                   className="flex-1 py-1.5 px-2.5 rounded-xl bg-[#181D2A] hover:bg-[#202738] border border-[#2A3348] text-[11px] font-semibold text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
@@ -1172,6 +1281,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                     const dataUrl = event.target?.result as string;
                     if (dataUrl) {
                       setRawImageForCrop(dataUrl);
+                      setCropTarget('avatar');
                       setIsCropModalOpen(true);
                     }
                   };
@@ -1316,14 +1426,18 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
 
       </div>
 
-      {/* Profile Picture Crop Modal */}
+      {/* Profile Picture / Banner Crop Modal */}
       <ImageCropModal
         isOpen={isCropModalOpen}
-        imageUrl={rawImageForCrop || avatarUrl}
-        title="Crop Profile Avatar"
-        mode="avatar"
+        imageUrl={rawImageForCrop || (cropTarget === 'banner' ? bannerUrl : avatarUrl)}
+        title={cropTarget === 'banner' ? 'Crop Profile Banner (1200×400)' : 'Crop Profile Avatar (1:1)'}
+        mode={cropTarget === 'banner' ? 'banner' : 'avatar'}
         onCropComplete={(croppedDataUrl) => {
-          setAvatarUrl(croppedDataUrl);
+          if (cropTarget === 'banner') {
+            setBannerUrl(croppedDataUrl);
+          } else {
+            setAvatarUrl(croppedDataUrl);
+          }
           setIsCropModalOpen(false);
         }}
         onClose={() => setIsCropModalOpen(false)}

@@ -258,7 +258,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           )}
         </div>
 
-        {/* Name, Handle & Follower stats */}
+        {/* Name, Handle & Credits Badge (replacing following count) */}
         <div className="mb-2">
           <h2 className="text-xl font-bold text-white tracking-tight leading-tight">
             {user.name}
@@ -266,14 +266,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <p className="text-xs text-[#9298A3] font-mono">@{user.username}</p>
             <span className="text-[#9298A3]/50">·</span>
-            <button 
-              type="button"
-              onClick={() => setActiveTab('following')}
-              className="text-xs font-mono text-white/90 hover:text-[#3B82FF] transition-colors cursor-pointer"
-            >
-              <strong className="text-white">{followingUsers.length}</strong>{' '}
-              <span className="text-[#9298A3]">following</span>
-            </button>
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#2166FF]/15 border border-[#2166FF]/30 text-[#3B82FF]">
+              <CreditIcon size={12} credited className="text-[#3B82FF]" />
+              <span className="text-xs font-mono font-bold tabular-nums text-white">{totalCreditsAccumulated}</span>
+              <span className="text-[11px] font-medium text-[#8A92A6]">credits</span>
+            </div>
           </div>
         </div>
 
@@ -351,7 +348,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             </button>
           ) : (
             <button
-              onClick={() => onToggleFollow?.(user.id || user.username)}
+              onClick={() => onToggleFollow?.(user.id)}
               className={`flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                 user.isFollowing
                   ? 'bg-[#101010] text-emerald-400 border border-[#20242C] hover:bg-[#1a1f29]'
@@ -387,8 +384,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           </div>
         )}
 
-        {/* STATS SECTION: COMMUNITIES JOINED, CHALLENGES COMPLETED, CHALLENGES ONGOING, TOTAL LIKES ACCUMULATED */}
-        <div className="grid grid-cols-4 gap-1 sm:gap-2 py-3 px-2 rounded-2xl bg-[#090C13] border border-[#1C2230] mb-4 text-center">
+        {/* STATS SECTION: 3 ITEMS (COMMUNITIES JOINED, CHALLENGES COMPLETED, ONGOING CHALLENGES) */}
+        <div className="grid grid-cols-3 gap-2 py-3 px-2 rounded-2xl bg-[#090C13] border border-[#1C2230] mb-4 text-center">
           {/* 1. Communities Joined */}
           <button 
             type="button"
@@ -444,25 +441,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             </span>
             <span className="text-[9px] text-[#3B82FF] font-mono">
               Challenges
-            </span>
-          </button>
-
-          {/* 4. Total Credits Accumulated Over Each Post */}
-          <button 
-            type="button"
-            onClick={() => setActiveTab('posts')}
-            className="flex flex-col items-center justify-center py-1 px-1 rounded-xl hover:bg-[#101010] transition-all cursor-pointer group"
-            title="Total credits accumulated over each post"
-          >
-            <span className="text-base sm:text-lg font-bold text-[#3B82FF] tabular-nums font-mono flex items-center justify-center gap-1 group-hover:text-white transition-colors" title="Total Credits">
-              <CreditIcon size={16} credited className="text-[#3B82FF] shrink-0" />
-              <span>{totalCreditsAccumulated}</span>
-            </span>
-            <span className="text-[10px] text-[#9298A3] group-hover:text-white transition-colors truncate max-w-full font-medium">
-              Credits
-            </span>
-            <span className="text-[9px] text-[#3B82FF] font-mono">
-              Earned
             </span>
           </button>
         </div>

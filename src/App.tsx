@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Author, Challenge, CohortProof, Comment, Community, CommunityPost, JoinRequest, NotificationItem, Post, PurposeLabel, ScreenType, Squad, ToDoItem } from './types';
+import { Author, Challenge, CohortProof, Comment, Community, CommunityPost, JoinRequest, NotificationItem, Post, PurposeLabel, ScreenType, Squad, SquadChatMessage, ToDoItem } from './types';
 import { TopHeader } from './components/TopHeader';
 import { Navigation } from './components/Navigation';
 import { HomeScreen } from './components/screens/HomeScreen';
@@ -103,6 +103,7 @@ export default function App() {
     const s = StorageService.getSquads();
     return s && s.length > 0 ? s : [];
   });
+  const [squadChatMessages, setSquadChatMessages] = useState<SquadChatMessage[]>([]);
   const [communityPosts, setCommunityPosts] = useState<CommunityPost[]>(() => {
     const s = StorageService.getCommunityPosts();
     return s && s.length > 0 ? s : [];
@@ -179,13 +180,16 @@ export default function App() {
         profilesRes,
         postsRes,
         postLikesRes,
+        postCreditsRes,
         postCommentsRes,
         challengesRes,
         cohortProofsRes,
         communitiesRes,
         squadsRes,
         squadMembersRes,
+        squadChatRes,
         userLikesRes,
+        userPostCreditsRes,
         userBookmarksRes,
         userParticipantsRes,
         userMembershipsRes,
@@ -196,13 +200,16 @@ export default function App() {
         supabase.from('profiles').select('*').limit(150),
         supabase.from('posts').select('*').order('created_at', { ascending: false }),
         supabase.from('post_likes').select('post_id, user_id'),
+        supabase.from('post_credits').select('post_id, user_id, vote_type'),
         supabase.from('post_comments').select('*').order('created_at', { ascending: false }),
         supabase.from('challenges').select('*').order('created_at', { ascending: false }),
         supabase.from('cohort_proofs').select('*').order('created_at', { ascending: false }),
         supabase.from('communities').select('*').order('created_at', { ascending: false }),
         supabase.from('squads').select('*').order('created_at', { ascending: false }),
         supabase.from('squad_members').select('*'),
+        supabase.from('squad_chat_messages').select('*').order('created_at', { ascending: true }).limit(200),
         activeAuthId ? supabase.from('post_likes').select('post_id').eq('user_id', activeAuthId) : Promise.resolve({ data: [] }),
+        activeAuthId ? supabase.from('post_credits').select('post_id, vote_type').eq('user_id', activeAuthId) : Promise.resolve({ data: [] }),
         activeAuthId ? supabase.from('post_bookmarks').select('post_id').eq('user_id', activeAuthId) : Promise.resolve({ data: [] }),
         activeAuthId ? supabase.from('challenge_participants').select('challenge_id, current_progress').eq('user_id', activeAuthId) : Promise.resolve({ data: [] }),
         activeAuthId ? supabase.from('community_members').select('community_id').eq('user_id', activeAuthId) : Promise.resolve({ data: [] }),
@@ -210,46 +217,57 @@ export default function App() {
         activeAuthId
           ? supabase.from('notifications').select('*').eq('recipient_id', activeAuthId).order('created_at', { ascending: false }).limit(100)
           : Promise.resolve({ data: [] }),
-        activeAuthId
-          ? (supabase.from('follows').select('following_id').eq('follower_id', activeAuthId) as any).then((res: any) => res?.error ? { data: [] } : res).catch(() => ({ data: [] }))
-          : Promise.resolve({ data: [] }),
+        activeAuthId ? supabase.from('follows').select('following_id').eq('follower_id', activeAuthId) : Promise.resolve({ data: [] }),
       ]);
 
-      // 1. Process profiles and follows
-      const effectiveUserId = activeAuthId || currentUser.id;
-      const remoteFollowsList = ((userFollowsRes?.data as any[]) || []).map((r: any) => r.following_id);
-      const localFollowsList = StorageService.getUserFollows(effectiveUserId);
-      const followedSet = new Set<string>([
-        ...remoteFollowsList,
-        ...localFollowsList.map((f: string) => f.toLowerCase()),
-      ]);
-
+      // 1. Process profiles & follows
       const allDbProfiles = profilesRes.data || [];
       const profileMap = new Map<string, any>();
       allDbProfiles.forEach((p: any) => profileMap.set(p.id, p));
 
+      const effectiveFollowerId = activeAuthId || currentUser.id;
+      const remoteFollows = ((userFollowsRes?.data as any[]) || []).map((f: any) => f.following_id);
+      const localFollows = StorageService.getUserFollows(effectiveFollowerId);
+      const myFollows = new Set([...remoteFollows, ...localFollows]);
+      const mappedSquadChat: SquadChatMessage[] = ((squadChatRes.data as any[]) || []).map((row: any) => {
+        const senderProfile = profileMap.get(row.sender_id);
+        return {
+          id: row.id,
+          squadId: row.squad_id,
+          author: {
+            id: row.sender_id,
+            name: senderProfile?.name || 'Builder',
+            username: senderProfile?.username || 'builder',
+            avatar: senderProfile?.avatar_url || '',
+          },
+          text: row.text,
+          timestamp: new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+      });
+      setSquadChatMessages(mappedSquadChat);
+
       if (allDbProfiles.length > 0) {
-        const mappedCreators: Author[] = allDbProfiles.map((p: any) => {
-          const isFollowed = followedSet.has(p.id) || (p.username && followedSet.has(p.username.toLowerCase()));
-          return {
-            id: p.id,
-            name: p.name || 'Builder',
-            username: p.username || 'builder',
-            avatar: p.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-            bio: p.bio || '',
-            followersCount: p.followers_count || 0,
-            followingCount: p.following_count || 0,
-            accountabilityHubPrivacy: (p.accountability_hub_privacy as 'public' | 'private') || 'public',
-            isCurrentUser: p.id === activeAuthId,
-            isFollowing: isFollowed,
-          };
-        });
+        const mappedCreators: Author[] = allDbProfiles.map((p: any) => ({
+          id: p.id,
+          name: p.name || 'Builder',
+          username: p.username || 'builder',
+          avatar: p.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+          bannerUrl: p.banner_url || undefined,
+          bio: p.bio || '',
+          followersCount: p.followers_count || 0,
+          followingCount: p.following_count || 0,
+          accountabilityHubPrivacy: (p.accountability_hub_privacy as 'public' | 'private') || 'public',
+          isCurrentUser: p.id === activeAuthId,
+          isFollowing: myFollows.has(p.id) || myFollows.has(p.username),
+        }));
         setAllCreators(mappedCreators);
         StorageService.saveCreators(mappedCreators);
       }
 
       // 2. Active user profile & relations
       let remoteLikedSet = new Set<string>();
+      const remoteVoteByPost = new Map<string, 'credit' | 'discredit'>();
+      const netCreditsByPost = new Map<string, number>();
       let remoteBookmarkedSet = new Set<string>();
       const joinedChallengeIds = new Set<string>();
       const participantProgressMap = new Map<string, number>();
@@ -263,6 +281,7 @@ export default function App() {
             name: myProfile.name || currentUser.name || 'Daily Builder',
             username: myProfile.username || currentUser.username || 'builder',
             avatar: myProfile.avatar_url || currentUser.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+            bannerUrl: myProfile.banner_url || currentUser.bannerUrl,
             bio: myProfile.bio ?? (currentUser.bio || ''),
             followersCount: myProfile.followers_count || 0,
             followingCount: myProfile.following_count || 0,
@@ -286,6 +305,9 @@ export default function App() {
 
         remoteLikedSet = new Set(((userLikesRes.data as any[]) || []).map((r: any) => r.post_id));
         StorageService.saveUserLikes(Array.from(remoteLikedSet), activeAuthId);
+        ((userPostCreditsRes.data as any[]) || []).forEach((row: any) => {
+          remoteVoteByPost.set(row.post_id, row.vote_type);
+        });
 
         remoteBookmarkedSet = new Set(((userBookmarksRes.data as any[]) || []).map((r: any) => r.post_id));
         StorageService.saveUserBookmarks(Array.from(remoteBookmarkedSet), activeAuthId);
@@ -316,17 +338,15 @@ export default function App() {
         }
       }
 
+      const effectiveUserId = activeAuthId || currentUser.id;
       const localLikedSet = new Set(StorageService.getUserLikes(effectiveUserId));
       const localBookmarkedSet = new Set(StorageService.getUserBookmarks(effectiveUserId));
 
       // 3. Process Comments grouped by post_id
-      const commentVotes = StorageService.getCommentVotes(effectiveUserId);
       const commentsByPost = new Map<string, any[]>();
       ((postCommentsRes.data as any[]) || []).forEach((c: any) => {
         const p = profileMap.get(c.author_id);
         const arr = commentsByPost.get(c.post_id) || [];
-        const vote = commentVotes[c.id] || null;
-        const upCount = Math.max(0, c.likes_count || 0);
         arr.push({
           id: c.id,
           author: {
@@ -338,10 +358,7 @@ export default function App() {
           },
           text: c.text,
           timestamp: new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          likes: upCount,
-          upvotes: upCount,
-          downvotes: 0,
-          userVote: vote,
+          likes: c.likes_count || 0,
         });
         commentsByPost.set(c.post_id, arr);
       });
@@ -351,16 +368,25 @@ export default function App() {
       ((postLikesRes.data as any[]) || []).forEach((row: any) => {
         trueLikesCountMap.set(row.post_id, (trueLikesCountMap.get(row.post_id) || 0) + 1);
       });
+      ((postCreditsRes.data as any[]) || []).forEach((row: any) => {
+        netCreditsByPost.set(
+          row.post_id,
+          (netCreditsByPost.get(row.post_id) || 0) + (row.vote_type === 'credit' ? 1 : -1)
+        );
+      });
 
       // 5. Process Posts
       const dbPosts = postsRes.data || [];
       if (dbPosts.length > 0) {
         const mappedRemotePosts: Post[] = dbPosts.map((p: any) => {
-          const isLiked = Boolean(
-            (activeAuthId && (remoteLikedSet.has(p.id) || remoteLikedSet.has(toDeterministicUUID(p.id)))) ||
-            localLikedSet.has(p.id) ||
-            localLikedSet.has(toDeterministicUUID(p.id))
-          );
+          const hasRemoteVote = remoteVoteByPost.has(p.id);
+          const isLiked = hasRemoteVote
+            ? remoteVoteByPost.get(p.id) === 'credit'
+            : Boolean(
+                (activeAuthId && (remoteLikedSet.has(p.id) || remoteLikedSet.has(toDeterministicUUID(p.id)))) ||
+                localLikedSet.has(p.id) ||
+                localLikedSet.has(toDeterministicUUID(p.id))
+              );
           const isSaved = Boolean(
             (activeAuthId && (remoteBookmarkedSet.has(p.id) || remoteBookmarkedSet.has(toDeterministicUUID(p.id)))) ||
             localBookmarkedSet.has(p.id) ||
@@ -388,9 +414,13 @@ export default function App() {
           remoteComments.forEach((rc: Comment) => commentMap.set(rc.id, rc));
           const postComments = Array.from(commentMap.values());
 
+          const localVote = StorageService.getCommunityVotes(effectiveUserId)[p.id];
+          const userVote = remoteVoteByPost.get(p.id) || localVote || (isLiked ? 'credit' : null);
           const totalCredits = p.credits_count !== undefined && p.credits_count !== null
             ? Number(p.credits_count)
-            : totalLikes;
+            : postCreditsRes.data
+              ? Math.max(0, netCreditsByPost.get(p.id) || 0)
+              : totalLikes;
 
           return {
             id: p.id,
@@ -400,14 +430,13 @@ export default function App() {
               username: authorProfile?.username || 'creator',
               avatar: authorProfile?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
               isCurrentUser: p.author_id === activeAuthId,
-              isFollowing: followedSet.has(p.author_id) || (authorProfile?.username && followedSet.has(authorProfile.username.toLowerCase())),
             },
             content: p.content,
             purpose: p.purpose,
             timestamp: new Date(p.created_at).toLocaleDateString(),
             likesCount: totalCredits,
             creditsCount: totalCredits,
-            userVote: isLiked ? 'credit' : null,
+            userVote,
             commentsCount: Math.max(postComments.length, p.comments_count || 0),
             comments: postComments,
             isLiked,
@@ -474,7 +503,11 @@ export default function App() {
                 'Discussion'
               ) as CommunityPost['category'],
               upvotes: p.likes_count || 0,
-              userVote: remoteLikedSet.has(p.id) ? 'up' : null,
+              userVote: (remoteVoteByPost.get(p.id) || (remoteLikedSet.has(p.id) ? 'credit' : null)) === 'credit'
+                ? 'up'
+                : remoteVoteByPost.get(p.id) === 'discredit'
+                  ? 'down'
+                  : null,
               timestamp: new Date(p.created_at).toLocaleDateString(),
               commentsCount: p.comments_count || 0,
             };
@@ -511,6 +544,7 @@ export default function App() {
           timestamp: new Date(cp.created_at).toLocaleDateString(),
           likesCount: cp.likes_count || 0,
           isLiked: false,
+          verified: cp.verified ?? false,
         });
         proofsByChallenge.set(cp.challenge_id, arr);
       });
@@ -536,6 +570,8 @@ export default function App() {
             title: c.title,
             description: c.description,
             whatYouPerform: c.what_you_perform,
+            difficulty: c.difficulty,
+            createdAt: c.created_at,
             category: c.category,
             type: c.type,
             current: currentDay,
@@ -547,8 +583,10 @@ export default function App() {
             icon: c.icon,
             status: c.status,
             joined: isJoined,
+            participantsCount: c.participants_count || 0,
             squadProofs: mergedProofs,
             creator: creatorProfile ? {
+              id: creatorProfile.id,
               name: creatorProfile.name,
               username: creatorProfile.username,
               avatar: creatorProfile.avatar_url,
@@ -751,6 +789,7 @@ export default function App() {
           name: derivedName,
           username: derivedUsername,
           avatar: derivedAvatar,
+          bannerUrl: dbProfile?.banner_url || meta.banner_url || currentUser.bannerUrl,
           bio: dbProfile?.bio || meta.bio || '',
           followersCount: dbProfile?.followers_count || 0,
           followingCount: dbProfile?.following_count || 0,
@@ -766,8 +805,12 @@ export default function App() {
           email: u.email,
         });
 
-        // If user already has an account, immediately load main app
-        const hasExistingAccount = Boolean(dbProfile?.username || meta.onboarding_completed || StorageService.isOnboardingCompleted());
+        // If user already completed onboarding and has an established profile, load main app
+        const hasExistingAccount = Boolean(
+          (meta.onboarding_completed || dbProfile?.onboarding_completed) &&
+          dbProfile?.username &&
+          dbProfile?.username !== 'builder'
+        );
         if (hasExistingAccount) {
           StorageService.setOnboardingCompleted(true);
           setIsOnboardingDone(true);
@@ -790,16 +833,17 @@ export default function App() {
           .eq('id', u.id)
           .maybeSingle();
 
-        const derivedName = dbProfile?.name || meta.name || meta.full_name || u.email?.split('@')[0] || 'Daily Builder';
-        const derivedUsername = dbProfile?.username || meta.username || u.email?.split('@')[0]?.toLowerCase().replace(/[^a-z0-9_.]/g, '') || 'builder';
+        const derivedName = dbProfile?.name || meta.name || meta.full_name || u.email?.split('@')[0] || '';
+        const derivedUsername = dbProfile?.username || meta.username || u.email?.split('@')[0]?.toLowerCase().replace(/[^a-z0-9_.]/g, '') || '';
         const derivedAvatar = dbProfile?.avatar_url || meta.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80';
 
         const authUser: Author = {
           ...currentUser,
           id: u.id,
-          name: derivedName,
-          username: derivedUsername,
+          name: derivedName || 'Builder',
+          username: derivedUsername || 'builder',
           avatar: derivedAvatar,
+          bannerUrl: dbProfile?.banner_url || meta.banner_url || currentUser.bannerUrl,
           bio: dbProfile?.bio || meta.bio || '',
           followersCount: dbProfile?.followers_count || 0,
           followingCount: dbProfile?.following_count || 0,
@@ -815,11 +859,18 @@ export default function App() {
           email: u.email,
         });
 
-        const hasExistingAccount = Boolean(dbProfile?.username || meta.onboarding_completed || StorageService.isOnboardingCompleted());
+        const hasExistingAccount = Boolean(
+          (meta.onboarding_completed || dbProfile?.onboarding_completed) &&
+          dbProfile?.username &&
+          dbProfile?.username !== 'builder'
+        );
         if (hasExistingAccount) {
           StorageService.setOnboardingCompleted(true);
           setIsOnboardingDone(true);
           fetchSupabaseData(u.id);
+        } else {
+          StorageService.setOnboardingCompleted(false);
+          setIsOnboardingDone(false);
         }
       } else if (event === 'SIGNED_OUT') {
         StorageService.setOnboardingCompleted(false);
@@ -928,6 +979,15 @@ export default function App() {
         } else if (payload.eventType === 'DELETE' && !ownOptimisticUpdate) {
           setPosts(prev => prev.map(p => (p.id === postId || toDeterministicUUID(p.id) === postId) ? { ...p, likesCount: Math.max(0, p.likesCount - 1) } : p));
         }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'post_credits' }, () => {
+        fetchSupabaseData(undefined, true);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'follows' }, () => {
+        fetchSupabaseData(undefined, true);
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'squad_chat_messages' }, () => {
+        fetchSupabaseData(undefined, true);
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'post_comments' }, () => {
         fetchSupabaseData(undefined, true);
@@ -1160,6 +1220,7 @@ export default function App() {
             name: data.name || targetUserObj.name,
             username: data.username,
             avatar: data.avatar_url || targetUserObj.avatar,
+            bannerUrl: data.banner_url || targetUserObj.bannerUrl,
             bio: data.bio || targetUserObj.bio,
             isCurrentUser: false,
             isFollowing: Boolean(targetUserObj.isFollowing),
@@ -1174,64 +1235,64 @@ export default function App() {
 
   // Toggle follow user
   const handleToggleFollow = async (userIdOrUsername: string) => {
-    const targetCreator = allCreators.find(
-      (c) => c.id === userIdOrUsername || c.username?.toLowerCase() === userIdOrUsername.toLowerCase()
-    ) || (viewingUser && (viewingUser.id === userIdOrUsername || viewingUser.username?.toLowerCase() === userIdOrUsername.toLowerCase()) ? viewingUser : null);
-
-    const targetId = targetCreator?.id || userIdOrUsername;
-    const targetUsername = targetCreator?.username || (userIdOrUsername.startsWith('@') ? userIdOrUsername.slice(1) : userIdOrUsername);
-
-    const activeUid = currentUser?.id;
-    const currentFollows = StorageService.getUserFollows(activeUid);
-    const isCurrentlyFollowed = currentFollows.some(
-      (f) => f.toLowerCase() === targetId.toLowerCase() || f.toLowerCase() === targetUsername.toLowerCase()
+    const targetUser = allCreators.find((creator) =>
+      creator.id === userIdOrUsername || creator.username === userIdOrUsername
+    ) || (
+      viewingUser.id === userIdOrUsername || viewingUser.username === userIdOrUsername
+        ? viewingUser
+        : posts.find((post) => post.author.id === userIdOrUsername || post.author.username === userIdOrUsername)?.author
     );
-    const nowFollowing = !isCurrentlyFollowed;
+    if (!targetUser || targetUser.id === currentUser.id || targetUser.username === currentUser.username) return;
 
-    // Persist to StorageService
-    const updatedFollows = nowFollowing
-      ? Array.from(new Set([...currentFollows, targetId, targetUsername.toLowerCase()]))
-      : currentFollows.filter(
-          (f) => f.toLowerCase() !== targetId.toLowerCase() && f.toLowerCase() !== targetUsername.toLowerCase()
-        );
-    StorageService.saveUserFollows(updatedFollows, activeUid);
-
-    // Update creators list
-    setAllCreators((prev) =>
-      prev.map((c) => {
-        if (c.id === targetId || c.username?.toLowerCase() === targetUsername.toLowerCase()) {
-          return {
-            ...c,
-            isFollowing: nowFollowing,
-            followersCount: nowFollowing ? (c.followersCount || 0) + 1 : Math.max(0, (c.followersCount || 1) - 1),
-          };
+    const targetId = targetUser.id;
+    const targetUsername = targetUser.username;
+    const nowFollowing = !targetUser.isFollowing;
+    try {
+      const activeUserId = await getActiveAuthUserId();
+      if (activeUserId) {
+        if (!isValidUUID(targetId)) {
+          showToast('This account cannot be followed until it has a Supabase profile.');
+          return;
         }
-        return c;
-      })
-    );
-
-    // Update active viewing profile if applicable
-    setViewingUser((prev) => {
-      if (prev.id === targetId || prev.username?.toLowerCase() === targetUsername.toLowerCase()) {
-        return {
-          ...prev,
-          isFollowing: nowFollowing,
-          followersCount: nowFollowing ? (prev.followersCount || 0) + 1 : Math.max(0, (prev.followersCount || 1) - 1),
-        };
+        const { error } = nowFollowing
+          ? await supabase.from('follows').upsert({
+              follower_id: activeUserId,
+              following_id: targetId,
+            }, { onConflict: 'follower_id,following_id', ignoreDuplicates: true })
+          : await supabase.from('follows').delete().match({
+              follower_id: activeUserId,
+              following_id: targetId,
+            });
+        if (error) {
+          reportCloudSyncError('follow update', error);
+          return;
+        }
       }
-      return prev;
+    } catch (error) {
+      console.error('Supabase follow update failed:', error);
+      showToast('Follow update failed. Please try again.');
+      return;
+    }
+
+    const updateFollowState = (author: Author): Author => ({
+      ...author,
+      isFollowing: nowFollowing,
+      followersCount: Math.max(0, (author.followersCount || 0) + (nowFollowing ? 1 : -1)),
     });
+    setAllCreators((prev) => prev.map((creator) =>
+      creator.id === targetId || creator.username === targetUsername ? updateFollowState(creator) : creator
+    ));
+    setViewingUser((prev) =>
+      prev.id === targetId || prev.username === targetUsername ? updateFollowState(prev) : prev
+    );
 
     // Update posts authored by this user
     setPosts((prev) =>
       prev.map((post) => {
-        if (post.author.id === targetId || post.author.username?.toLowerCase() === targetUsername.toLowerCase()) {
+        if (post.author.id === targetId || post.author.username === targetUsername) {
           return {
             ...post,
-            author: {
-              ...post.author,
-              isFollowing: nowFollowing,
-            },
+            author: updateFollowState(post.author),
           };
         }
         return post;
@@ -1246,170 +1307,32 @@ export default function App() {
         : Math.max(0, (prev.followingCount || 1) - 1),
     }));
 
-    showToast(nowFollowing ? `Now following @${targetUsername || userIdOrUsername}` : `Unfollowed @${targetUsername || userIdOrUsername}`);
-
-    // Persist to Supabase follows table
-    try {
-      const activeUserId = await getActiveAuthUserId();
-      if (activeUserId && isValidUUID(activeUserId) && isValidUUID(targetId)) {
-        if (nowFollowing) {
-          await supabase.from('follows').upsert({
-            follower_id: activeUserId,
-            following_id: targetId,
-          });
-        } else {
-          await supabase.from('follows').delete().match({
-            follower_id: activeUserId,
-            following_id: targetId,
-          });
-        }
-      }
-    } catch (e) {
-      console.warn('Supabase follow sync notice:', e);
-    }
-  };
-
-  // Interactions: Thumbs Up / Thumbs Down Comment
-  const handleVoteComment = async (postId: string, commentId: string, direction: 'up' | 'down') => {
-    const activeUid = currentUser?.id;
-    const currentVotes = StorageService.getCommentVotes(activeUid);
-    const existingVote = currentVotes[commentId] || null;
-
-    let nextVote: 'up' | 'down' | null = direction;
-    let deltaUp = 0;
-    let deltaDown = 0;
-
-    if (existingVote === direction) {
-      nextVote = null;
-      if (direction === 'up') deltaUp = -1;
-      else deltaDown = -1;
-    } else if (existingVote) {
-      if (direction === 'up') {
-        deltaUp = 1;
-        deltaDown = -1;
-      } else {
-        deltaUp = -1;
-        deltaDown = 1;
-      }
-    } else {
-      if (direction === 'up') deltaUp = 1;
-      else deltaDown = 1;
-    }
-
-    StorageService.saveCommentVote(commentId, nextVote, activeUid);
-
-    // Update posts state comments
-    setPosts((prev) =>
-      prev.map((p) => {
-        if (p.id === postId) {
-          const updatedComments = (p.comments || []).map((c) => {
-            if (c.id === commentId) {
-              const curUp = c.upvotes ?? (c.likes > 0 ? c.likes : 0);
-              const curDown = c.downvotes ?? 0;
-              const newUp = Math.max(0, curUp + deltaUp);
-              const newDown = Math.max(0, curDown + deltaDown);
-              return {
-                ...c,
-                upvotes: newUp,
-                downvotes: newDown,
-                likes: newUp,
-                userVote: nextVote,
-              };
-            }
-            return c;
-          });
-          return {
-            ...p,
-            comments: updatedComments,
-          };
-        }
-        return p;
-      })
-    );
-
-    // Keep selectedPostForComments modal in sync
-    setSelectedPostForComments((prev) => {
-      if (!prev || prev.id !== postId) return prev;
-      const updatedComments = (prev.comments || []).map((c) => {
-        if (c.id === commentId) {
-          const curUp = c.upvotes ?? (c.likes > 0 ? c.likes : 0);
-          const curDown = c.downvotes ?? 0;
-          const newUp = Math.max(0, curUp + deltaUp);
-          const newDown = Math.max(0, curDown + deltaDown);
-          return {
-            ...c,
-            upvotes: newUp,
-            downvotes: newDown,
-            likes: newUp,
-            userVote: nextVote,
-          };
-        }
-        return c;
-      });
-      return {
-        ...prev,
-        comments: updatedComments,
-      };
-    });
-
-    // Update in Supabase post_comments if valid UUID
-    try {
-      if (isValidUUID(commentId)) {
-        const { data: cRow } = await supabase.from('post_comments').select('likes_count').eq('id', commentId).maybeSingle();
-        if (cRow) {
-          const newLikes = Math.max(0, (cRow.likes_count || 0) + deltaUp);
-          await supabase.from('post_comments').update({ likes_count: newLikes }).eq('id', commentId);
-        }
-      }
-    } catch (e) {
-      console.warn('Supabase comment vote sync notice:', e);
-    }
+    // Persist to StorageService
+    const currentFollows = StorageService.getUserFollows(currentUser.id);
+    const updatedFollows = nowFollowing
+      ? [...new Set([...currentFollows, targetId, targetUsername].filter(Boolean))]
+      : currentFollows.filter((id) => id !== targetId && id !== targetUsername && id !== userIdOrUsername);
+    StorageService.saveUserFollows(updatedFollows, currentUser.id);
+    showToast(nowFollowing ? `Now following @${targetUsername}` : `Unfollowed @${targetUsername}`);
   };
 
   // Interactions: Credit / Like Post (Credit 'C')
   const handleToggleLike = async (postId: string) => {
-    let nextIsLiked = false;
-    let nextUserVote: 'credit' | 'discredit' | null = 'credit';
-    let nextCount = 0;
+    const targetPost = posts.find((post) => post.id === postId);
+    if (!targetPost) return;
+    const currentVote = targetPost.userVote || (targetPost.isLiked ? 'credit' : null);
+    const nextUserVote: 'credit' | 'discredit' | null = currentVote === 'credit' ? null : 'credit';
+    const voteDelta = nextUserVote === 'credit'
+      ? currentVote === 'discredit' ? 2 : 1
+      : -1;
+    const nextCount = Math.max(0, (targetPost.creditsCount ?? targetPost.likesCount) + voteDelta);
+    const nextIsLiked = nextUserVote === 'credit';
 
     setPosts((prev) => {
-      const updated = prev.map((post) => {
-        if (post.id === postId) {
-          const isComm = Boolean(post.communityId || post.communityName);
-          const currentVote = post.userVote || (post.isLiked ? 'credit' : null);
-
-          if (isComm) {
-            let delta = 0;
-            if (currentVote === 'credit') {
-              nextUserVote = null;
-              nextIsLiked = false;
-              delta = -1;
-            } else if (currentVote === 'discredit') {
-              nextUserVote = 'credit';
-              nextIsLiked = true;
-              delta = 2;
-            } else {
-              nextUserVote = 'credit';
-              nextIsLiked = true;
-              delta = 1;
-            }
-            nextCount = Math.max(0, (post.creditsCount ?? post.likesCount) + delta);
-          } else {
-            nextIsLiked = !post.isLiked;
-            nextUserVote = nextIsLiked ? 'credit' : null;
-            nextCount = nextIsLiked ? post.likesCount + 1 : Math.max(0, post.likesCount - 1);
-          }
-
-          return {
-            ...post,
-            isLiked: nextIsLiked,
-            userVote: nextUserVote,
-            creditsCount: nextCount,
-            likesCount: nextCount,
-          };
-        }
-        return post;
-      });
+      const updated = prev.map((post) => post.id === postId
+        ? { ...post, isLiked: nextIsLiked, userVote: nextUserVote, creditsCount: nextCount, likesCount: nextCount }
+        : post
+      );
       StorageService.savePosts(updated);
       return updated;
     });
@@ -1423,81 +1346,62 @@ export default function App() {
     StorageService.saveUserCredits(updatedLikes, activeUid);
     StorageService.saveCommunityVote(postId, nextUserVote, activeUid);
 
-    // Sync with Supabase database
     try {
       const activeUserId = await getActiveAuthUserId();
-      const safePostId = toDeterministicUUID(postId);
-      const safeUserId = activeUserId;
-
-      if (safeUserId && isValidUUID(safePostId)) {
-        await syncProfileToSupabase({ ...currentUser, id: safeUserId });
-
-        await supabase
-          .from('posts')
-          .update({ credits_count: nextCount, likes_count: nextCount })
-          .eq('id', safePostId);
-
-        if (nextIsLiked) {
-          await supabase.from('post_likes').upsert({
-            post_id: safePostId,
-            user_id: safeUserId,
-          });
-          try {
-            await supabase.from('post_credits').upsert({
-              post_id: safePostId,
-              user_id: safeUserId,
-              vote_type: 'credit',
-            });
-          } catch {}
-        } else {
-          await supabase.from('post_likes').delete().match({
-            post_id: safePostId,
-            user_id: safeUserId,
-          });
-          try {
-            await supabase.from('post_credits').delete().match({
-              post_id: safePostId,
-              user_id: safeUserId,
-            });
-          } catch {}
-        }
+      if (!activeUserId) return;
+      if (!isValidUUID(postId)) {
+        showToast('This post is only saved on this device and cannot receive a cloud credit yet.');
+        return;
       }
-    } catch (e) {
-      console.warn('Supabase credit sync notice:', e);
+      const voteResult = nextUserVote
+        ? await supabase.from('post_credits').upsert({
+            post_id: postId,
+            user_id: activeUserId,
+            vote_type: nextUserVote,
+          }, { onConflict: 'post_id,user_id' })
+        : await supabase.from('post_credits').delete().match({
+            post_id: postId,
+            user_id: activeUserId,
+          });
+      if (voteResult.error) {
+        reportCloudSyncError('post credit', voteResult.error);
+        return;
+      }
+
+      const legacyResult = nextIsLiked
+        ? await supabase.from('post_likes').upsert({
+            post_id: postId,
+            user_id: activeUserId,
+          }, { onConflict: 'post_id,user_id', ignoreDuplicates: true })
+        : await supabase.from('post_likes').delete().match({
+            post_id: postId,
+            user_id: activeUserId,
+          });
+      if (legacyResult.error) {
+        console.warn('Legacy post like sync warning:', legacyResult.error.message);
+      }
+    } catch (error) {
+      console.error('Supabase post credit sync failed:', error);
+      showToast('Credit saved on this device, but cloud sync failed.');
     }
   };
 
   // Interactions: Discredit Post in Community (Discredit 'DC')
   const handleToggleDiscredit = async (postId: string) => {
-    let nextUserVote: 'credit' | 'discredit' | null = 'discredit';
-    let nextCount = 0;
+    const targetPost = posts.find((post) => post.id === postId);
+    if (!targetPost) return;
+    const currentVote = targetPost.userVote || (targetPost.isLiked ? 'credit' : null);
+    const nextUserVote: 'credit' | 'discredit' | null = currentVote === 'discredit' ? null : 'discredit';
+    const voteDelta = nextUserVote === 'discredit'
+      ? currentVote === 'credit' ? -2 : -1
+      : 1;
+    const nextCount = Math.max(0, (targetPost.creditsCount ?? targetPost.likesCount) + voteDelta);
 
     setPosts((prev) => {
-      const updated = prev.map((post) => {
-        if (post.id === postId) {
-          const currentVote = post.userVote || (post.isLiked ? 'credit' : null);
-          let delta = 0;
-          if (currentVote === 'discredit') {
-            nextUserVote = null;
-            delta = 1;
-          } else if (currentVote === 'credit') {
-            nextUserVote = 'discredit';
-            delta = -2;
-          } else {
-            nextUserVote = 'discredit';
-            delta = -1;
-          }
-          nextCount = Math.max(0, (post.creditsCount ?? post.likesCount) + delta);
-          return {
-            ...post,
-            isLiked: false,
-            userVote: nextUserVote,
-            creditsCount: nextCount,
-            likesCount: nextCount,
-          };
-        }
-        return post;
-      });
+      const updated = prev.map((post) => post.id === postId
+        ? { ...post, isLiked: false, userVote: nextUserVote, creditsCount: nextCount, likesCount: nextCount }
+        : post
+      );
       StorageService.savePosts(updated);
       return updated;
     });
@@ -1507,34 +1411,33 @@ export default function App() {
 
     try {
       const activeUserId = await getActiveAuthUserId();
-      const safePostId = toDeterministicUUID(postId);
-      if (activeUserId && isValidUUID(safePostId)) {
-        await supabase
-          .from('posts')
-          .update({ credits_count: nextCount, likes_count: nextCount })
-          .eq('id', safePostId);
-
-        try {
-          if (nextUserVote === 'discredit') {
-            await supabase.from('post_credits').upsert({
-              post_id: safePostId,
-              user_id: activeUserId,
-              vote_type: 'discredit',
-            });
-            await supabase.from('post_likes').delete().match({
-              post_id: safePostId,
-              user_id: activeUserId,
-            });
-          } else {
-            await supabase.from('post_credits').delete().match({
-              post_id: safePostId,
-              user_id: activeUserId,
-            });
-          }
-        } catch {}
+      if (!activeUserId) return;
+      if (!isValidUUID(postId)) {
+        showToast('This post is only saved on this device and cannot receive a cloud discredit yet.');
+        return;
       }
-    } catch (e) {
-      console.warn('Supabase discredit notice:', e);
+      const voteResult = nextUserVote
+        ? await supabase.from('post_credits').upsert({
+            post_id: postId,
+            user_id: activeUserId,
+            vote_type: nextUserVote,
+          }, { onConflict: 'post_id,user_id' })
+        : await supabase.from('post_credits').delete().match({
+            post_id: postId,
+            user_id: activeUserId,
+          });
+      if (voteResult.error) {
+        reportCloudSyncError('post discredit', voteResult.error);
+        return;
+      }
+      const legacyResult = await supabase.from('post_likes').delete().match({
+        post_id: postId,
+        user_id: activeUserId,
+      });
+      if (legacyResult.error) console.warn('Legacy post like sync warning:', legacyResult.error.message);
+    } catch (error) {
+      console.error('Supabase post discredit sync failed:', error);
+      showToast('Discredit saved on this device, but cloud sync failed.');
     }
   };
 
@@ -1717,25 +1620,42 @@ export default function App() {
       const safeAuthorId = activeUserId;
 
       if (safeAuthorId && isValidUUID(safePostId)) {
-        await syncProfileToSupabase({ ...currentUser, id: safeAuthorId });
+        const profileSaved = await syncProfileToSupabase({ ...currentUser, id: safeAuthorId });
+        if (!profileSaved) {
+          showToast('Comment saved on this device, but your cloud profile is not ready.');
+          return;
+        }
 
         // Ensure post exists in public.posts
         const targetPost = posts.find((p) => isMatch(p.id)) || sourcePost;
-        const { data: existingPost } = await supabase
+        const { data: existingPost, error: existingPostError } = await supabase
           .from('posts')
           .select('id')
           .eq('id', safePostId)
           .maybeSingle();
 
+        if (existingPostError) {
+          reportCloudSyncError('comment lookup', existingPostError);
+          return;
+        }
         if (!existingPost && targetPost) {
-          await supabase.from('posts').insert({
+          const targetAuthorId = targetPost.author.id;
+          if (targetAuthorId !== safeAuthorId) {
+            showToast('This post is not available in the cloud yet, so the comment could not be saved.');
+            return;
+          }
+          const { error: postInsertError } = await supabase.from('posts').insert({
             id: safePostId,
-            author_id: safeAuthorId,
+            author_id: targetAuthorId,
             content: targetPost.content || text,
             purpose: targetPost.purpose || 'Progress',
             likes_count: targetPost.likesCount || 0,
-            comments_count: 1,
+            comments_count: 0,
           });
+          if (postInsertError) {
+            reportCloudSyncError('comment post creation', postInsertError);
+            return;
+          }
         }
 
         const { error: commentErr } = await supabase.from('post_comments').insert({
@@ -1747,15 +1667,7 @@ export default function App() {
         });
 
         if (commentErr) {
-          console.warn('Supabase comment insert notice:', commentErr.message);
-        } else {
-          try {
-            await supabase.from('posts').update({
-              comments_count: (targetPost?.commentsCount || 0) + 1,
-            }).eq('id', safePostId);
-          } catch {
-            // Ignore non-author post update constraint
-          }
+          reportCloudSyncError('comment', commentErr);
         }
       }
     } catch (e) {
@@ -1971,6 +1883,44 @@ export default function App() {
     }
   };
 
+  // Interactions: Share Post to Challenge as a daily verified proof
+  const handleSharePostToChallenge = ({
+    originalPost,
+    targetChallenge,
+    note,
+  }: {
+    originalPost: Post;
+    targetChallenge: Challenge;
+    note: string;
+  }) => {
+    const isOwnPost = originalPost.author.id === currentUser.id ||
+      originalPost.author.username.toLowerCase() === currentUser.username.toLowerCase();
+    if (!isOwnPost) {
+      showToast('Only your own posts can be shared to challenges.');
+      return;
+    }
+    const photoUrl = originalPost.imageUrl || originalPost.mediaUrls?.[0];
+    if (!photoUrl) {
+      showToast('Attach a photo to your post before sharing it as challenge proof.');
+      return;
+    }
+    const proofId = getSafeUUID();
+    const newProof: CohortProof = {
+      id: proofId,
+      challengeId: targetChallenge.id,
+      author: currentUser,
+      dayNumber: Math.min((targetChallenge.current || 0) + 1, targetChallenge.target),
+      timestamp: 'Just now',
+      likesCount: 0,
+      isLiked: false,
+      note: note || originalPost.content,
+      photoUrl,
+      verified: false,
+    };
+    void handleAddCohortProof(targetChallenge.id, newProof);
+    showToast(`Shared to "${targetChallenge.title}" as Day ${newProof.dayNumber} proof!`);
+  };
+
   // Interactions: Create Community Discussion / Question / Advice / Story
   const handleCreateCommunityDiscussion = async (post: Partial<CommunityPost>) => {
     const discId = post.id || getSafeUUID();
@@ -2073,10 +2023,11 @@ export default function App() {
           return;
         }
 
-        const { error: voteError } = await supabase.from('post_likes').upsert({
+        const { error: voteError } = await supabase.from('post_credits').upsert({
           post_id: discId,
           user_id: safeAuthorId,
-        });
+          vote_type: 'credit',
+        }, { onConflict: 'post_id,user_id' });
         reportCloudSyncError('community post vote', voteError);
       }
     } catch (e) {
@@ -2085,30 +2036,78 @@ export default function App() {
     }
   };
 
-  // Interactions: Upvote / Downvote Community Discussion
-  const handleVoteDiscussion = (postId: string, direction: 'up' | 'down') => {
-    setCommunityPosts((prev) =>
-      prev.map((p) => {
-        if (p.id === postId) {
-          let delta = 0;
-          let newVote: 'up' | 'down' | null = direction;
-          if (p.userVote === direction) {
-            delta = direction === 'up' ? -1 : 1;
-            newVote = null;
-          } else if (p.userVote) {
-            delta = direction === 'up' ? 2 : -2;
-          } else {
-            delta = direction === 'up' ? 1 : -1;
-          }
-          return {
-            ...p,
-            upvotes: Math.max(0, p.upvotes + delta),
-            userVote: newVote,
-          };
-        }
-        return p;
-      })
-    );
+  // Interactions: Credit / Discredit Community Discussion
+  const handleVoteDiscussion = async (postId: string, direction: 'up' | 'down') => {
+    const targetPost = communityPosts.find((post) => post.id === postId);
+    if (!targetPost) return;
+    const desiredVote: 'credit' | 'discredit' = direction === 'up' ? 'credit' : 'discredit';
+    const currentVote = targetPost.userVote === 'up' ? 'credit'
+      : targetPost.userVote === 'down' ? 'discredit' : null;
+    const nextVote: 'credit' | 'discredit' | null = currentVote === desiredVote ? null : desiredVote;
+    const nextCredits = Math.max(0, targetPost.upvotes +
+      (nextVote === 'credit' ? currentVote === 'discredit' ? 2 : 1
+        : nextVote === 'discredit' ? currentVote === 'credit' ? -2 : -1
+          : currentVote === 'credit' ? -1 : 1));
+    const mappedVote = nextVote === 'credit' ? 'up' : nextVote === 'discredit' ? 'down' : null;
+
+    const updateLocalVote = (post: CommunityPost): CommunityPost => ({
+      ...post,
+      upvotes: nextCredits,
+      credits: nextCredits,
+      userVote: mappedVote,
+    });
+    setCommunityPosts((prev) => {
+      const updated = prev.map((post) => post.id === postId ? updateLocalVote(post) : post);
+      StorageService.saveCommunityPosts(updated);
+      return updated;
+    });
+    setPosts((prev) => {
+      const updated = prev.map((post) => post.id === postId
+        ? { ...post, creditsCount: nextCredits, likesCount: nextCredits, isLiked: nextVote === 'credit', userVote: nextVote }
+        : post
+      );
+      StorageService.savePosts(updated);
+      return updated;
+    });
+    StorageService.saveCommunityVote(postId, nextVote, currentUser.id);
+
+    try {
+      const activeUserId = await getActiveAuthUserId();
+      if (!activeUserId) return;
+      if (!isValidUUID(postId)) {
+        showToast('This community post cannot be synced until it has a cloud record.');
+        return;
+      }
+      const voteResult = nextVote
+        ? await supabase.from('post_credits').upsert({
+            post_id: postId,
+            user_id: activeUserId,
+            vote_type: nextVote,
+          }, { onConflict: 'post_id,user_id' })
+        : await supabase.from('post_credits').delete().match({
+            post_id: postId,
+            user_id: activeUserId,
+          });
+      if (voteResult.error) {
+        reportCloudSyncError('community credit', voteResult.error);
+        return;
+      }
+      const legacyResult = nextVote === 'credit'
+        ? await supabase.from('post_likes').upsert({
+            post_id: postId,
+            user_id: activeUserId,
+          }, { onConflict: 'post_id,user_id', ignoreDuplicates: true })
+        : await supabase.from('post_likes').delete().match({
+            post_id: postId,
+            user_id: activeUserId,
+          });
+      if (legacyResult.error) {
+        console.warn('Legacy community like sync warning:', legacyResult.error.message);
+      }
+    } catch (error) {
+      console.error('Supabase community vote sync failed:', error);
+      showToast('Community vote saved on this device, but cloud sync failed.');
+    }
   };
 
   // Interactions: Challenge Progress Log / Check In
@@ -2289,6 +2288,8 @@ export default function App() {
       title: data.title || 'New Challenge',
       description: data.description || '',
       whatYouPerform: data.whatYouPerform || data.description || '',
+      difficulty: data.difficulty || 'Medium',
+      createdAt: new Date().toISOString(),
       current: 1, // When started/created, mark as Day 1
       target: data.target || 30,
       unit: data.unit || 'days',
@@ -2303,6 +2304,7 @@ export default function App() {
       squadMembers: data.squadMembers,
       participantsCount: 1,
       creator: {
+        id: currentUser.id,
         name: currentUser.name,
         username: currentUser.username,
         avatar: currentUser.avatar,
@@ -2326,6 +2328,7 @@ export default function App() {
           title: newChallenge.title,
           description: newChallenge.description,
           what_you_perform: newChallenge.whatYouPerform,
+          difficulty: newChallenge.difficulty,
           category: newChallenge.category,
           type: newChallenge.type,
           target: newChallenge.target,
@@ -2360,7 +2363,7 @@ export default function App() {
 
   // Interactions: Add Cohort Proof & update challenge progress
   const handleAddCohortProof = async (challengeId: string, proof: CohortProof) => {
-    const persistProof = async (photoUrl: string | undefined) => {
+    const persistProof = async (photoUrl: string | undefined): Promise<boolean> => {
       const savedProof = { ...proof, photoUrl };
       const addProofToChallenge = (challenge: Challenge): Challenge => ({
         ...challenge,
@@ -2379,7 +2382,7 @@ export default function App() {
 
       try {
         const userId = await getActiveAuthUserId();
-        if (!isValidUUID(userId) || !isValidUUID(challengeId)) return;
+        if (!userId || !isValidUUID(challengeId)) return true;
 
         const { error } = await supabase.from('cohort_proofs').upsert({
           id: proof.id,
@@ -2389,10 +2392,11 @@ export default function App() {
           note: proof.note,
           photo_url: photoUrl?.startsWith('data:') ? null : photoUrl || null,
           likes_count: proof.likesCount || 0,
+          verified: Boolean(proof.verified),
         });
         if (error) {
           reportCloudSyncError('challenge proof', error);
-          return;
+          return false;
         }
 
         const challenge = challenges.find((item) => item.id === challengeId);
@@ -2401,10 +2405,15 @@ export default function App() {
           user_id: userId,
           current_progress: Math.min((challenge?.current || 0) + 1, challenge?.target || proof.dayNumber),
         });
-        reportCloudSyncError('challenge progress', participantError);
+        if (participantError) {
+          reportCloudSyncError('challenge progress', participantError);
+          return false;
+        }
+        return true;
       } catch (error) {
         console.error('Supabase challenge proof save failed:', error);
         showToast('Proof saved on this device, but cloud sync failed.');
+        return false;
       }
     };
 
@@ -2418,10 +2427,82 @@ export default function App() {
       }
     }
 
-    await persistProof(photoUrl);
-    showToast(photoUploadFailed
-      ? 'Proof saved, but its photo could not be uploaded.'
-      : `✓ Photo proof recorded for ${proof.author.name}!`);
+    const cloudSaved = await persistProof(photoUrl);
+    if (photoUploadFailed) {
+      showToast('Proof saved, but its photo could not be uploaded.');
+    } else if (cloudSaved) {
+      showToast(`Photo proof recorded for ${proof.author.name}.`);
+    } else {
+      showToast('Proof saved on this device, but cloud sync failed.');
+    }
+  };
+
+  const handleVerifyCohortProof = async (challengeId: string, proofId: string): Promise<boolean> => {
+    try {
+      const activeUserId = await getActiveAuthUserId();
+      if (!activeUserId) {
+        showToast('Sign in to verify challenge proofs.');
+        return false;
+      }
+      const { error } = await supabase
+        .from('cohort_proofs')
+        .update({ verified: true })
+        .eq('id', proofId)
+        .eq('challenge_id', challengeId);
+      if (error) {
+        reportCloudSyncError('proof verification', error);
+        return false;
+      }
+
+      const markVerified = (challenge: Challenge): Challenge => ({
+        ...challenge,
+        squadProofs: (challenge.squadProofs || []).map((proof) =>
+          proof.id === proofId ? { ...proof, verified: true } : proof
+        ),
+      });
+      setChallenges((prev) => prev.map((challenge) =>
+        challenge.id === challengeId ? markVerified(challenge) : challenge
+      ));
+      setActiveChallenge((prev) => prev?.id === challengeId ? markVerified(prev) : prev);
+      return true;
+    } catch (error) {
+      console.error('Supabase proof verification failed:', error);
+      showToast('Proof verification failed. Please try again.');
+      return false;
+    }
+  };
+
+  const handleSendSquadMessage = async (squadId: string, text: string) => {
+    const trimmedText = text.trim();
+    if (!trimmedText) return;
+    const message: SquadChatMessage = {
+      id: getSafeUUID(),
+      squadId,
+      author: currentUser,
+      text: trimmedText,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    setSquadChatMessages((previous) => [...previous, message]);
+    StorageService.addSquadChatMessage(squadId, message);
+
+    try {
+      const activeUserId = await getActiveAuthUserId();
+      if (!activeUserId) return;
+      if (!isValidUUID(squadId)) {
+        showToast('This squad chat is only saved on this device until the squad is synced.');
+        return;
+      }
+      const { error } = await supabase.from('squad_chat_messages').insert({
+        id: message.id,
+        squad_id: squadId,
+        sender_id: activeUserId,
+        text: trimmedText,
+      });
+      if (error) reportCloudSyncError('squad message', error);
+    } catch (error) {
+      console.error('Supabase squad message save failed:', error);
+      showToast('Message saved on this device, but cloud sync failed.');
+    }
   };
 
   // Squad Management Handlers
@@ -2895,13 +2976,22 @@ export default function App() {
     accountabilityHubPrivacy?: 'public' | 'private' 
   }) => {
     let nextAvatar = updated.avatar || currentUser.avatar;
-    if (nextAvatar && nextAvatar.startsWith('data:')) {
-      try {
-        const hosted = await uploadMediaToSupabase('avatars', nextAvatar, updated.username);
-        if (hosted) nextAvatar = hosted;
-      } catch {
-        // graceful fallback to dataUrl
+    let nextBanner = updated.bannerUrl || currentUser.bannerUrl;
+    try {
+      if (nextAvatar.startsWith('data:')) {
+        nextAvatar = await uploadMediaToSupabase('avatars', nextAvatar, updated.username);
       }
+      if (nextBanner?.startsWith('data:')) {
+        nextBanner = await uploadMediaToSupabase('avatars', nextBanner, `banner_${updated.username}`);
+      }
+    } catch (error) {
+      console.error('Profile image upload failed:', error);
+      showToast('Profile image upload failed. Please try again.');
+      return;
+    }
+    if (nextAvatar.startsWith('data:') || nextBanner?.startsWith('data:')) {
+      showToast('Profile image upload failed. Please try another image.');
+      return;
     }
 
     const updatedUser: Author = {
@@ -2910,7 +3000,7 @@ export default function App() {
       username: updated.username,
       bio: updated.bio,
       avatar: nextAvatar,
-      ...(updated.bannerUrl ? { bannerUrl: updated.bannerUrl } : {}),
+      ...(nextBanner ? { bannerUrl: nextBanner } : {}),
       ...(updated.accountabilityHubPrivacy ? { accountabilityHubPrivacy: updated.accountabilityHubPrivacy } : {}),
     };
 
@@ -3000,41 +3090,26 @@ export default function App() {
       return nextCreators;
     });
 
-    showToast('Profile picture & details updated');
+    showToast('Profile details updated');
 
     // Persist to Supabase database profiles table and Auth user_metadata
     try {
-      let activeUserId: string | undefined = currentUser?.id;
-      if (!isValidUUID(activeUserId)) {
-        const { data: sessionData } = await supabase.auth.getSession();
-        activeUserId = sessionData?.session?.user?.id;
-      }
-
-      if (isValidUUID(activeUserId)) {
-        await syncProfileToSupabase({
-          id: activeUserId!,
+      const activeUserId = await getActiveAuthUserId();
+      if (activeUserId) {
+        const savedProfile = await syncProfileToSupabase({
+          id: activeUserId,
           name: updated.name,
           username: updated.username,
           bio: updated.bio,
           avatar: nextAvatar,
+          bannerUrl: nextBanner,
           accountabilityHubPrivacy: updated.accountabilityHubPrivacy || currentUser.accountabilityHubPrivacy || 'public',
         });
-
-        const metaUpdate: any = {
-          name: updated.name,
-          username: updated.username,
-          bio: updated.bio,
-        };
-        if (nextAvatar.startsWith('http')) {
-          metaUpdate.avatar_url = nextAvatar;
-        }
-
-        await supabase.auth.updateUser({
-          data: metaUpdate,
-        });
+        if (!savedProfile) showToast('Profile updated on this device, but cloud sync failed.');
       }
-    } catch (err) {
-      console.warn('Supabase profile update notice:', err);
+    } catch (error) {
+      console.error('Supabase profile update failed:', error);
+      showToast('Profile updated on this device, but cloud sync failed.');
     }
   };
 
@@ -3232,6 +3307,26 @@ export default function App() {
   const handleDeleteComment = async (postId: string, commentId: string) => {
     const isMatch = (id?: string) => id === postId || toDeterministicUUID(id || '') === postId || id === toDeterministicUUID(postId);
 
+    try {
+      const activeUserId = await getActiveAuthUserId();
+      const safePostId = toDeterministicUUID(postId);
+      if (activeUserId && isValidUUID(safePostId) && isValidUUID(commentId)) {
+        const { error } = await supabase
+          .from('post_comments')
+          .delete()
+          .eq('id', commentId)
+          .eq('post_id', safePostId);
+        if (error) {
+          reportCloudSyncError('comment deletion', error);
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('Supabase comment deletion failed:', error);
+      showToast('Comment deletion failed. Please try again.');
+      return;
+    }
+
     setPosts((prev) => {
       const updated = prev.map((post) => {
         if (isMatch(post.id)) {
@@ -3267,14 +3362,6 @@ export default function App() {
 
     showToast('Comment deleted');
 
-    try {
-      const activeUserId = await getActiveAuthUserId();
-      if (activeUserId) {
-        await supabase.from('post_comments').delete().eq('id', commentId);
-      }
-    } catch (e) {
-      console.warn('Supabase comment deletion error:', e);
-    }
   };
 
   const handleDeleteChallenge = async (challengeId: string) => {
@@ -3459,16 +3546,15 @@ export default function App() {
     }
     setIsOnboardingDone(true);
 
-    // Sync profile to Supabase and load live data
-    syncProfileToSupabase(newUser).finally(() => {
-      fetchSupabaseData(newUser.id);
-    });
+    if (isValidUUID(newUser.id)) {
+      void fetchSupabaseData(newUser.id);
+    }
 
     showToast(`Welcome, ${newUser.name}! Your account is ready.`);
   };
 
   const handleResetToFreshData = () => {
-    StorageService.clearAll();
+    StorageService.clearDemoContent();
     const cleanUser: Author = {
       ...currentUser,
       followersCount: 0,
@@ -3476,15 +3562,19 @@ export default function App() {
     };
     setCurrentUser(cleanUser);
     setViewingUser(cleanUser);
+    setAccountabilityHubUser(cleanUser);
     setPosts([]);
     setChallenges([]);
     setCommunities([]);
+    setCommunityPosts([]);
+    setAllCreators([]);
     setToDoList([]);
     setNotifications([]);
     setSquads([]);
+    setSquadChatMessages([]);
     setActiveChallenge(null);
     setActiveCommunity(null);
-    showToast('Clean slate active! You can now feed and save fresh real data.');
+    showToast('Local demo content cleared. Your account is still signed in.');
   };
 
   // Render current screen contents
@@ -3531,6 +3621,8 @@ export default function App() {
             onAcceptAllSquadEntry={handleAcceptAllSquadEntry}
             onDeleteSquad={handleDeleteSquad}
             onDeleteChallenge={handleDeleteChallenge}
+            squadChatMessages={squadChatMessages}
+            onSendSquadMessage={handleSendSquadMessage}
           />
         );
       case 'create':
@@ -3629,6 +3721,7 @@ export default function App() {
             onNavigateUser={(user) => handleNavigateToUser(user)}
             onToggleFollow={handleToggleFollow}
             onAddProof={handleAddCohortProof}
+            onVerifyProof={handleVerifyCohortProof}
           />
         );
       }
@@ -3953,7 +4046,6 @@ export default function App() {
         onClose={() => setSelectedPostForComments(null)}
         onAddComment={handleAddComment}
         onDeleteComment={handleDeleteComment}
-        onVoteComment={handleVoteComment}
         onNavigateAuthorProfile={(author) => handleNavigateToUser(author)}
       />
 
@@ -4019,10 +4111,6 @@ export default function App() {
         <SettingsModal
           currentUser={currentUser}
           onToggleHubPrivacy={handleToggleHubPrivacy}
-          onRestartOnboarding={() => {
-            setIsSettingsOpen(false);
-            setIsOnboardingDone(false);
-          }}
           onResetToFreshData={handleResetToFreshData}
           onSignOut={handleSignOut}
           onLogIn={handleLogIn}
@@ -4044,14 +4132,16 @@ export default function App() {
         onDeletePost={handleDeletePost}
       />
 
-      {/* Share to Community & Quick Share Modal */}
+      {/* Share to Community & Challenges Modal */}
       <ShareModal
         isOpen={!!selectedPostForShare}
         post={selectedPostForShare}
         currentUser={currentUser}
         joinedCommunities={communities.filter((c) => c.isJoined)}
+        joinedChallenges={challenges.filter((c) => c.joined)}
         onClose={() => setSelectedPostForShare(null)}
         onShareToCommunity={handleSharePostToCommunity}
+        onShareToChallenge={handleSharePostToChallenge}
         onCopyLink={() => {
           navigator.clipboard?.writeText(window.location.href);
           showToast('Post link copied to clipboard');

@@ -68,55 +68,55 @@ export const syncProfileToSupabase = async (profile: {
   username: string;
   avatar?: string;
   bio?: string;
+  banner?: string;
+  bannerUrl?: string;
   accountabilityHubPrivacy?: 'public' | 'private';
 }): Promise<boolean> => {
-  let targetId = profile.id;
-
-  // If provided ID is not a valid UUID, see if there is an active Supabase auth session
-  if (!isValidUUID(targetId)) {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user?.id && isValidUUID(session.user.id)) {
-        targetId = session.user.id;
-      } else {
-        return false;
-      }
-    } catch {
-      return false;
-    }
-  }
+  if (!isValidUUID(profile.id)) return false;
+  const resolvedBanner = profile.bannerUrl || profile.banner || '';
 
   const profilePayload = {
+    id: profile.id,
     username: profile.username.trim().toLowerCase().replace(/^@/, ''),
     name: profile.name.trim(),
     avatar_url: profile.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+    ...(resolvedBanner ? { banner_url: resolvedBanner } : {}),
     bio: profile.bio || '',
     accountability_hub_privacy: profile.accountabilityHubPrivacy || 'public',
+    onboarding_completed: true,
     updated_at: new Date().toISOString(),
   };
 
   try {
-    // 1. Try updating existing row
-    const { data: updateData, error: updateErr } = await supabase
-      .from('profiles')
-      .update(profilePayload)
-      .eq('id', targetId)
-      .select('id');
-
-    if (!updateErr && updateData && updateData.length > 0) {
-      return true;
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || session?.user?.id !== profile.id) {
+      if (sessionError) console.warn('Supabase profile sync session error:', sessionError.message);
+      return false;
     }
 
-    // 2. If update didn't match any row or errored, try upsert/insert
-    const { error: insertErr } = await supabase
-      .from('profiles')
-      .upsert({
-        id: targetId,
-        ...profilePayload,
-      });
+    const authMeta: Record<string, unknown> = {
+      name: profilePayload.name,
+      username: profilePayload.username,
+      bio: profilePayload.bio,
+      onboarding_completed: true,
+    };
+    if (profilePayload.avatar_url && !profilePayload.avatar_url.startsWith('data:')) {
+      authMeta.avatar_url = profilePayload.avatar_url;
+    }
+    if (resolvedBanner && !resolvedBanner.startsWith('data:')) {
+      authMeta.banner_url = resolvedBanner;
+    }
+    const { error: metadataError } = await supabase.auth.updateUser({ data: authMeta });
+    if (metadataError) {
+      console.warn('Supabase auth metadata sync warning:', metadataError.message);
+    }
 
-    if (insertErr) {
-      console.warn('Supabase profile upsert warning:', insertErr.message);
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .upsert(profilePayload, { onConflict: 'id' });
+
+    if (profileError) {
+      console.warn('Supabase profile upsert error:', profileError.message);
       return false;
     }
     return true;
@@ -132,6 +132,10 @@ export const uploadMediaToSupabase = async (
   filenamePrefix: string = 'media'
 ): Promise<string> => {
   try {
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) throw sessionError;
+    if (!session?.user?.id) return typeof dataUrlOrFile === 'string' ? dataUrlOrFile : '';
+
     let fileBlob: Blob;
     let extension = 'jpg';
 
@@ -144,7 +148,7 @@ export const uploadMediaToSupabase = async (
       const matches = dataUrlOrFile.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
       if (!matches) return dataUrlOrFile;
       const mimeType = matches[1];
-      extension = mimeType.split('/')[1] || 'jpg';
+      extension = mimeType.split('/')[1]?.replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
       const byteCharacters = atob(matches[2]);
       const byteNumbers = new Array(byteCharacters.length);
       for (let i = 0; i < byteCharacters.length; i++) {
@@ -153,17 +157,17 @@ export const uploadMediaToSupabase = async (
       fileBlob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
     } else {
       fileBlob = dataUrlOrFile;
-      extension = dataUrlOrFile.name.split('.').pop() || 'jpg';
+      extension = dataUrlOrFile.name.split('.').pop()?.replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
     }
 
-    const filename = `${filenamePrefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${extension}`;
+    const safePrefix = filenamePrefix.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filename = `${session.user.id}/${safePrefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${extension}`;
     const { data, error } = await supabase.storage.from(bucket).upload(filename, fileBlob, {
       cacheControl: '3600',
       upsert: true,
     });
 
     if (error || !data) {
-      // If bucket does not exist or upload policy fails, gracefully return the dataUrl
       console.warn(`Supabase Storage upload notice (${bucket}):`, error?.message);
       return typeof dataUrlOrFile === 'string' ? dataUrlOrFile : '';
     }

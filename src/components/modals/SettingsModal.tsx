@@ -22,7 +22,6 @@ interface SettingsModalProps {
   onClose: () => void;
   currentUser?: Author;
   onToggleHubPrivacy?: (newPrivacy: 'public' | 'private') => void;
-  onRestartOnboarding?: () => void;
   onResetToFreshData?: () => void;
   onSignOut?: () => void;
   onLogIn?: () => void;
@@ -33,7 +32,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   currentUser,
   onToggleHubPrivacy,
-  onRestartOnboarding,
   onResetToFreshData,
   onSignOut,
   onLogIn,
@@ -41,8 +39,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   const isPrivate = currentUser?.accountabilityHubPrivacy === 'private';
   const authSession = StorageService.getAuthSession();
-  const [resetConfirmed, setResetConfirmed] = useState(false);
   const [deleteAccountConfirmed, setDeleteAccountConfirmed] = useState(false);
+  const [resetContentConfirmed, setResetContentConfirmed] = useState(false);
 
   return (
     <div
@@ -212,41 +210,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Action Controls & Account Deletion */}
         <div className="space-y-2 pt-2 border-t border-[#20242C]">
-          {onRestartOnboarding && (
-            <button
-              onClick={() => {
-                onRestartOnboarding();
-                onClose();
-              }}
-              className="w-full py-2.5 rounded-xl bg-[#2166FF]/15 hover:bg-[#2166FF]/25 border border-[#2166FF]/30 text-xs font-semibold text-[#3B82FF] hover:text-white flex items-center justify-center gap-2 transition-colors cursor-pointer"
-            >
-              <RefreshCw size={13} />
-              <span>Revisit Onboarding Screen</span>
-            </button>
-          )}
-
-          {/* Reset sample data */}
           {onResetToFreshData && (
-            <div>
-              {!resetConfirmed ? (
+            <div className="pt-1">
+              {!resetContentConfirmed ? (
                 <button
                   type="button"
-                  onClick={() => setResetConfirmed(true)}
-                  className="w-full py-2 rounded-xl bg-[#121620] hover:bg-[#1a2130] border border-[#202738] text-xs font-semibold text-[#9298A3] hover:text-white flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  onClick={() => setResetContentConfirmed(true)}
+                  className="w-full py-2.5 rounded-xl bg-[#101010] hover:bg-[#1a1f29] border border-[#20242C] text-xs font-semibold text-[#9298A3] hover:text-white flex items-center justify-center gap-2 transition-colors cursor-pointer"
                 >
-                  <RefreshCw size={13} />
-                  <span>Reset Demo Content to Blank Slate</span>
+                  <RefreshCw size={14} />
+                  <span>Reset Demo Content to Blank</span>
                 </button>
               ) : (
-                <div className="p-3 rounded-xl bg-red-950/40 border border-red-500/40 space-y-2 animate-scale-in">
-                  <p className="text-xs text-red-200 text-center font-medium">
-                    Clear sample demo data and start fresh?
+                <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-2.5">
+                  <div className="flex items-center gap-2 text-amber-300 justify-center">
+                    <AlertTriangle size={15} />
+                    <span className="text-xs font-bold">Clear local demo content?</span>
+                  </div>
+                  <p className="text-[11px] text-[#c5cbd6] text-center leading-relaxed">
+                    This removes cached posts, follows, challenges, communities, and chat from this device. Your account and Supabase data will remain unchanged.
                   </p>
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      onClick={() => setResetConfirmed(false)}
-                      className="flex-1 py-1.5 rounded-lg bg-[#101010] text-xs text-[#9298A3] hover:text-white border border-[#20242C] cursor-pointer"
+                      onClick={() => setResetContentConfirmed(false)}
+                      className="flex-1 py-1.5 rounded-xl bg-[#101010] text-xs font-semibold text-[#9298A3] hover:text-white border border-[#20242C] cursor-pointer"
                     >
                       Cancel
                     </button>
@@ -254,12 +242,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       type="button"
                       onClick={() => {
                         onResetToFreshData();
-                        setResetConfirmed(false);
                         onClose();
                       }}
-                      className="flex-1 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-xs text-white font-bold cursor-pointer"
+                      className="flex-1 py-1.5 rounded-xl bg-[#2166FF] hover:bg-[#1a55d6] text-xs text-white font-bold cursor-pointer"
                     >
-                      Yes, Reset
+                      Clear Content
                     </button>
                   </div>
                 </div>

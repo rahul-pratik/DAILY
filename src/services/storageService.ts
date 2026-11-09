@@ -205,7 +205,7 @@ export const StorageService = {
     safeSet('daily_app_user_bookmarks', bookmarkedPostIds);
   },
 
-  // User Follows (Followed accounts & creators)
+  // User Follows
   getUserFollows(userId?: string): string[] {
     const key = userId ? `daily_app_user_follows_${userId}` : 'daily_app_user_follows';
     return safeParse<string[]>(key, []);
@@ -217,28 +217,18 @@ export const StorageService = {
     safeSet('daily_app_user_follows', followedIds);
   },
 
-  isUserFollowed(targetIdOrUsername: string, userId?: string): boolean {
-    const follows = this.getUserFollows(userId);
-    const target = targetIdOrUsername.toLowerCase();
-    return follows.some((f) => f.toLowerCase() === target);
+  // Squad Chat Messages
+  getSquadChatMessages(squadId: string): any[] {
+    const key = `daily_app_squad_chat_${squadId}`;
+    return safeParse<any[]>(key, []);
   },
 
-  // Comment Votes (Thumbs Up / Thumbs Down)
-  getCommentVotes(userId?: string): Record<string, 'up' | 'down'> {
-    const key = userId ? `daily_app_comment_votes_${userId}` : 'daily_app_comment_votes';
-    return safeParse<Record<string, 'up' | 'down'>>(key, {});
-  },
-
-  saveCommentVote(commentId: string, vote: 'up' | 'down' | null, userId?: string): void {
-    const key = userId ? `daily_app_comment_votes_${userId}` : 'daily_app_comment_votes';
-    const current = this.getCommentVotes(userId);
-    if (!vote) {
-      delete current[commentId];
-    } else {
-      current[commentId] = vote;
-    }
-    safeSet(key, current);
-    safeSet('daily_app_comment_votes', current);
+  addSquadChatMessage(squadId: string, message: any): any[] {
+    const key = `daily_app_squad_chat_${squadId}`;
+    const current = this.getSquadChatMessages(squadId);
+    const updated = [...current, message];
+    safeSet(key, updated);
+    return updated;
   },
 
   // Purge any old fake mock challenges or communities stored in localStorage
@@ -311,21 +301,41 @@ export const StorageService = {
     }
   },
 
-  // Reset entire application data
+  clearDemoContent(): void {
+    try {
+      [
+        KEYS.POSTS,
+        KEYS.COMMUNITY_POSTS,
+        KEYS.CHALLENGES,
+        KEYS.COMMUNITIES,
+        KEYS.TODOS,
+        KEYS.NOTIFICATIONS,
+        KEYS.CREATORS,
+        KEYS.SQUADS,
+        KEYS.COMMENTS_REGISTRY,
+      ].forEach((key) => localStorage.removeItem(key));
+
+      for (let index = localStorage.length - 1; index >= 0; index--) {
+        const key = localStorage.key(index);
+        if (key && (
+          key.startsWith('daily_app_user_') ||
+          key.startsWith('daily_app_comm_votes') ||
+          key.startsWith('daily_app_squad_chat_')
+        )) {
+          localStorage.removeItem(key);
+        }
+      }
+    } catch (e) {
+      console.error('Error clearing demo content:', e);
+    }
+  },
+
   clearAll(): void {
     try {
+      this.clearDemoContent();
       localStorage.removeItem(KEYS.USER);
       localStorage.removeItem(KEYS.ONBOARDING_DONE);
       localStorage.removeItem(KEYS.AUTH_SESSION);
-      localStorage.removeItem(KEYS.POSTS);
-      localStorage.removeItem(KEYS.CHALLENGES);
-      localStorage.removeItem(KEYS.COMMUNITIES);
-      localStorage.removeItem(KEYS.TODOS);
-      localStorage.removeItem(KEYS.NOTIFICATIONS);
-      localStorage.removeItem(KEYS.CREATORS);
-      localStorage.removeItem(KEYS.SQUADS);
-      localStorage.removeItem('daily_app_user_likes');
-      localStorage.removeItem('daily_app_user_bookmarks');
     } catch (e) {
       console.error('Error clearing storage:', e);
     }

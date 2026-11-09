@@ -15,9 +15,7 @@ import {
   Check, 
   Upload, 
   X, 
-  AlertTriangle, 
-  Maximize2,
-  Link as LinkIcon
+  Maximize2
 } from 'lucide-react';
 import { Author, Challenge, CohortProof } from '../../types';
 import { getSafeUUID } from '../../lib/supabase';
@@ -33,6 +31,7 @@ interface CohortDiscussionsScreenProps {
   onNavigateUser?: (user: { name: string; username: string }) => void;
   onToggleFollow?: (userId: string) => void;
   onAddProof?: (challengeId: string, proof: CohortProof) => void;
+  onVerifyProof?: (challengeId: string, proofId: string) => Promise<boolean>;
 }
 
 const DEFAULT_COHORT_PROOFS: Record<string, CohortProof[]> = {
@@ -49,6 +48,7 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
   onNavigateUser,
   onToggleFollow,
   onAddProof,
+  onVerifyProof,
 }) => {
   const [selectedCohort, setSelectedCohort] = useState<Challenge>(challenge);
   const [viewMode, setViewMode] = useState<'list' | 'detail'>(initialViewMode);
@@ -57,8 +57,6 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
   const [proofNote, setProofNote] = useState('');
   const [selectedProofPhoto, setSelectedProofPhoto] = useState<string | null>(null);
   const [proofPhotoName, setProofPhotoName] = useState<string>('');
-  const [showUrlInput, setShowUrlInput] = useState(false);
-  const [customPhotoUrl, setCustomPhotoUrl] = useState('');
   
   // Real file input ref
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -68,9 +66,6 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
 
   // Sorting/filtering: 'squad' vs 'all' (if solo challenge, only 'all')
   const [feedFilter, setFeedFilter] = useState<'squad' | 'all'>('squad');
-
-  // Squad missed photo proof tracking (If someone fails to upload a photo in a single day, progress returns to 0)
-  const [missedMemberUsernames, setMissedMemberUsernames] = useState<string[]>([]);
 
   // Proofs state: initialized from challenge or default proofs
   const [proofs, setProofs] = useState<CohortProof[]>(() => {
@@ -119,23 +114,6 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
     reader.readAsDataURL(file);
   };
 
-  // Quick Photo Presets
-  const handleQuickPreset = (url: string, label: string) => {
-    setSelectedProofPhoto(url);
-    setProofPhotoName(label);
-    setShowUrlInput(false);
-  };
-
-  // Handle URL photo entry
-  const handleApplyPhotoUrl = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!customPhotoUrl.trim()) return;
-    setSelectedProofPhoto(customPhotoUrl.trim());
-    setProofPhotoName('Linked Photo Proof');
-    setCustomPhotoUrl('');
-    setShowUrlInput(false);
-  };
-
   const handleToggleLikeProof = (id: string) => {
     setProofs(prev => prev.map(p => {
       if (p.id === id) {
@@ -152,18 +130,19 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
   // Handle proof submission
   const handleSubmitProof = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!proofNote.trim() && !selectedProofPhoto) return;
+    if (!selectedProofPhoto) return;
 
     const newProof: CohortProof = {
       id: getSafeUUID(),
       challengeId: selectedCohort.id,
       author: currentUser,
       dayNumber: (selectedCohort.current || 0) + 1,
-      note: proofNote.trim() || 'Daily photo proof uploaded and verified.',
-      photoUrl: selectedProofPhoto || 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=800&auto=format&fit=crop&q=80',
+      note: proofNote.trim(),
+      photoUrl: selectedProofPhoto,
       timestamp: 'Just now',
       likesCount: 1,
       isLiked: true,
+      verified: false,
     };
 
     setProofs([newProof, ...proofs]);
@@ -196,34 +175,43 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
   const squadMemberUsernames = new Set(
     (selectedCohort.squadMembers || []).map(m => m.username)
       .concat(selectedCohort.creator ? [selectedCohort.creator.username] : [])
-      .concat([currentUser.username, 'aarav.codes', 'runwithme', 'elena.ai', 'devin.creates'])
+    .concat([currentUser.username])
   );
 
+  // Determine if current user is moderator / creator of this challenge
+  const isModerator = Boolean(
+    (selectedCohort.creator?.username && currentUser?.username && selectedCohort.creator.username.toLowerCase() === currentUser.username.toLowerCase()) ||
+    (selectedCohort.creator?.id && selectedCohort.creator.id === currentUser?.id)
+  );
+
+  const handleVerifyProof = async (proofId: string) => {
+    if (!isModerator) return;
+    const saved = await onVerifyProof?.(selectedCohort.id, proofId);
+    if (onVerifyProof && !saved) return;
+    setProofs(prev => prev.map(p => p.id === proofId ? { ...p, verified: true } : p));
+  };
+
   // Filter proofs according to user selection:
-  // "In squad daily proofs and discussions , make sure to sort posts in squads and all , if solo challenge only all."
+  // Moderators verify challenge photos; only verified photos are shown in all cohort posts
   const filteredProofs = proofs.filter((p) => {
     if (selectedCohort.type === 'solo') {
-      return true; // Solo challenge only displays 'all'
+      if (p.photoUrl && p.verified === false && !isModerator && p.author.username !== currentUser.username && p.author.id !== currentUser.id) {
+        return false;
+      }
+      return true;
     }
     if (feedFilter === 'squad') {
       return squadMemberUsernames.has(p.author.username) || p.author.id === currentUser.id;
     }
-    return true; // 'all' displays everything
+    // 'all': only show photo proofs that are verified (or viewer is moderator / author is current user)
+    if (p.photoUrl && p.verified === false && !isModerator && p.author.username !== currentUser.username && p.author.id !== currentUser.id) {
+      return false;
+    }
+    return true;
   });
 
-  const squadProofsCount = proofs.filter(p => squadMemberUsernames.has(p.author.username) || p.author.id === currentUser.id).length;
-  const allProofsCount = proofs.length;
-
-  // Squad failure check: If someone fails to upload a photo in a single day, progress returns to 0
   const isSquadChallenge = selectedCohort.type === 'squad';
-  const hasSquadMemberMissed = isSquadChallenge && missedMemberUsernames.length > 0;
-  const effectiveCurrentDay = hasSquadMemberMissed ? 0 : (selectedCohort.current || 1);
-
-  const toggleSimulateMissedProof = (username: string) => {
-    setMissedMemberUsernames(prev => 
-      prev.includes(username) ? prev.filter(u => u !== username) : [...prev, username]
-    );
-  };
+  const effectiveCurrentDay = selectedCohort.current || 1;
 
   // ================= VIEW MODE: ALL COHORTS LIST =================
   if (viewMode === 'list') {
@@ -245,7 +233,7 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
                 <span>Cohort Discussions & Proofs</span>
               </h1>
               <p className="text-xs text-[#9298A3]">
-                Daily photo proofs, squad accountability chats, and shared sprints
+                Photo updates and conversations with your challenge cohort
               </p>
             </div>
           </div>
@@ -271,20 +259,18 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
                   </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
-                      <h3 className="text-sm font-bold text-white group-hover:text-[#3B82FF] transition-colors truncate">
+                      <h3 className="text-sm font-bold text-white group-hover:text-[#3B82FF] transition-colors break-words">
                         {cohort.title}
                       </h3>
                       <span className="text-[10px] font-bold text-[#3B82FF] bg-[#2166FF]/15 px-2 py-0.5 rounded-full border border-[#2166FF]/20">
                         {isSquad ? 'Squad' : 'Solo'}
                       </span>
                     </div>
-                    <p className="text-xs text-[#9298A3] truncate">
+                    <p className="text-xs text-[#9298A3] whitespace-pre-wrap break-words">
                       {cohort.whatYouPerform || cohort.description}
                     </p>
                     <div className="flex items-center gap-2 text-[10px] text-[#9298A3] font-mono mt-1">
                       <span>Day {cohort.current} of {cohort.target}</span>
-                      <span>•</span>
-                      <span className="text-emerald-400 font-semibold">Active Daily Proofs</span>
                     </div>
                   </div>
                 </div>
@@ -324,15 +310,15 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
                 isSquadChallenge ? 'bg-[#2166FF]/20 text-[#3B82FF] border border-[#2166FF]/30' : 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
               }`}>
-                {isSquadChallenge ? 'Squad Sprint' : 'Solo Focus'}
+                {isSquadChallenge ? 'Squad' : 'Solo'}
               </span>
             </div>
             <p className="text-xs text-[#9298A3] flex items-center gap-1.5 font-mono">
-              <span className={hasSquadMemberMissed ? 'text-red-400 font-bold' : 'text-emerald-400 font-medium'}>
+              <span className="text-emerald-400 font-medium">
                 Day {effectiveCurrentDay} of {selectedCohort.target}
               </span>
               <span>•</span>
-              <span>{isSquadChallenge ? `${selectedCohort.participantsCount || 4} Squad Members` : 'Solo Participant'}</span>
+              <span>{isSquadChallenge ? `${selectedCohort.participantsCount ?? selectedCohort.squadMembers?.length ?? 0} Squad Members` : 'Solo Participant'}</span>
             </p>
           </div>
         </div>
@@ -342,63 +328,9 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
           onClick={() => setViewMode('list')}
           className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#101010] hover:bg-[#1f242e] border border-[#20242C] text-[#9298A3] hover:text-white transition-colors cursor-pointer shrink-0"
         >
-          <span>All Cohorts</span>
+          <span>Back to list</span>
         </button>
       </div>
-
-      {/* SQUAD RULE BANNER: If someone among the squad fails to upload a photo in a single day, then their progress returns to 0 */}
-      {isSquadChallenge && (
-        <div className={`p-3.5 rounded-2xl border mb-4 transition-all ${
-          hasSquadMemberMissed ? 'bg-red-500/10 border-red-500/30' : 'bg-[#090D15] border-[#1E232F]'
-        }`}>
-          <div className="flex items-start gap-2.5">
-            <AlertTriangle size={16} className={`shrink-0 mt-0.5 ${hasSquadMemberMissed ? 'text-red-400' : 'text-amber-400'}`} />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <span className={`text-xs font-bold ${hasSquadMemberMissed ? 'text-red-400' : 'text-amber-300'}`}>
-                  {hasSquadMemberMissed ? '❌ Squad Streak Broken: Progress Returned to 0' : '⚡ Squad Accountability Rule'}
-                </span>
-                <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${
-                  hasSquadMemberMissed ? 'bg-red-500/20 text-red-300 font-bold' : 'bg-[#2166FF]/20 text-[#3B82FF]'
-                }`}>
-                  {hasSquadMemberMissed ? 'Reset: Day 0' : 'Zero Missed Photos Allowed'}
-                </span>
-              </div>
-              <p className="text-[11px] text-[#9298A3] mt-1 leading-relaxed">
-                {hasSquadMemberMissed ? (
-                  <span className="text-red-200">
-                    <strong>{missedMemberUsernames.join(', ')}</strong> missed today\'s daily photo proof. The squad progress has returned to Day 0.
-                  </span>
-                ) : (
-                  'In squad challenges, if anyone among the squad fails to upload a photo proof in a single day, the squad\'s progress returns to 0.'
-                )}
-              </p>
-
-              {/* Simulation control for testing the rule */}
-              <div className="flex items-center gap-2 mt-2 pt-2 border-t border-[#20242C]/60 flex-wrap">
-                <span className="text-[10px] text-[#8A92A6]">Simulate missed photo proof:</span>
-                {['devin.creates', 'elena.ai'].map((username) => {
-                  const isMissed = missedMemberUsernames.includes(username);
-                  return (
-                    <button
-                      key={username}
-                      type="button"
-                      onClick={() => toggleSimulateMissedProof(username)}
-                      className={`text-[10px] px-2 py-0.5 rounded-lg border font-mono transition-colors cursor-pointer ${
-                        isMissed 
-                          ? 'bg-red-500/20 text-red-300 border-red-500/40 hover:bg-red-500/30' 
-                          : 'bg-[#121620] text-[#9298A3] border-[#202738] hover:text-white'
-                      }`}
-                    >
-                      {isMissed ? `Restore @${username}` : `Fail @${username}`}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* DAILY PHOTO PROOF SUBMISSION CARD */}
       <form onSubmit={handleSubmitProof} className="p-3.5 sm:p-4 rounded-3xl bg-[#080B10] border border-[#20242C] mb-5 space-y-3 shadow-lg">
@@ -416,7 +348,7 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
         <textarea
           value={proofNote}
           onChange={(e) => setProofNote(e.target.value)}
-          placeholder="Share today's progress, notes, or verified sprint insights with your squad..."
+          placeholder="Add a note about your photo (optional)..."
           rows={2}
           className="w-full bg-[#101010] border border-[#20242C] rounded-2xl p-3 text-xs text-white placeholder-[#9298A3] focus:outline-none focus:border-[#2166FF] resize-none"
         />
@@ -464,96 +396,24 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
           onChange={handleFileSelect}
         />
 
-        {/* Custom Image URL Drawer */}
-        {showUrlInput && (
-          <div className="p-2.5 rounded-2xl bg-[#101010] border border-[#20242C] space-y-2">
-            <div className="flex items-center justify-between text-xs text-[#9298A3]">
-              <span>Paste direct photo URL:</span>
-              <button
-                type="button"
-                onClick={() => setShowUrlInput(false)}
-                className="text-[#9298A3] hover:text-white"
-              >
-                <X size={14} />
-              </button>
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="url"
-                value={customPhotoUrl}
-                onChange={(e) => setCustomPhotoUrl(e.target.value)}
-                placeholder="https://images.unsplash.com/photo-..."
-                className="flex-1 bg-black border border-[#20242C] rounded-xl px-3 py-1.5 text-xs text-white placeholder-[#9298A3] focus:outline-none focus:border-[#2166FF]"
-              />
-              <button
-                type="button"
-                onClick={handleApplyPhotoUrl}
-                className="px-3 py-1.5 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] text-white text-xs font-semibold cursor-pointer"
-              >
-                Attach
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Photo Attachment Options: File Pick, URL, and Presets */}
-        <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Real File Attachment Trigger */}
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
-                selectedProofPhoto
-                  ? 'bg-[#2166FF]/20 border-[#2166FF] text-white'
-                  : 'bg-[#101010] hover:bg-[#1a1f29] border-[#20242C] text-white hover:border-[#2166FF]/50'
-              }`}
-            >
-              <Upload size={13} className="text-[#3B82FF]" />
-              <span>{selectedProofPhoto ? 'Change Photo' : '+ Attach Photo'}</span>
-            </button>
-
-            {/* Paste URL Button */}
-            <button
-              type="button"
-              onClick={() => setShowUrlInput(!showUrlInput)}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#101010] hover:bg-[#1a1f29] border border-[#20242C] text-[#8A92A6] hover:text-white text-xs transition-colors cursor-pointer"
-              title="Paste image link"
-            >
-              <LinkIcon size={12} />
-              <span className="hidden sm:inline">URL</span>
-            </button>
-
-            {/* Realistic Quick Presets */}
-            <div className="flex items-center gap-1 text-[10px] text-[#9298A3] overflow-x-auto no-scrollbar">
-              <span className="hidden sm:inline">Presets:</span>
-              <button
-                type="button"
-                onClick={() => handleQuickPreset('https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=800&auto=format&fit=crop&q=80', 'Code_Terminal_Proof.png')}
-                className="px-2 py-1 rounded-lg bg-[#101010] hover:bg-[#1a1f29] border border-[#20242C] text-[#8A92A6] hover:text-white cursor-pointer whitespace-nowrap"
-              >
-                Code
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickPreset('https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?w=800&auto=format&fit=crop&q=80', 'Run_GPS_Proof.png')}
-                className="px-2 py-1 rounded-lg bg-[#101010] hover:bg-[#1a1f29] border border-[#20242C] text-[#8A92A6] hover:text-white cursor-pointer whitespace-nowrap"
-              >
-                Run
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickPreset('https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=800&auto=format&fit=crop&q=80', 'Deep_Reading_Notes.png')}
-                className="px-2 py-1 rounded-lg bg-[#101010] hover:bg-[#1a1f29] border border-[#20242C] text-[#8A92A6] hover:text-white cursor-pointer whitespace-nowrap"
-              >
-                Notes
-              </button>
-            </div>
-          </div>
+        {/* Photo Attachment Options: ONLY Attach Photo and submit */}
+        <div className="flex items-center justify-between gap-2 pt-1">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+              selectedProofPhoto
+                ? 'bg-[#2166FF]/20 border-[#2166FF] text-white'
+                : 'bg-[#101010] hover:bg-[#1a1f29] border-[#20242C] text-white hover:border-[#2166FF]/50'
+            }`}
+          >
+            <Upload size={13} className="text-[#3B82FF]" />
+            <span>{selectedProofPhoto ? 'Change Photo' : '+ Attach Photo'}</span>
+          </button>
 
           <button
             type="submit"
-            disabled={!proofNote.trim() && !selectedProofPhoto}
+            disabled={!selectedProofPhoto}
             className="px-4 py-2 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] disabled:bg-[#101010] text-white disabled:text-[#9298A3]/40 text-xs font-bold flex items-center gap-1.5 transition-all shadow-md shadow-[#2166FF]/20 cursor-pointer shrink-0"
           >
             <Send size={13} />
@@ -578,7 +438,7 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
                 }`}
               >
                 <Users size={13} />
-                <span>Squad Posts ({squadProofsCount})</span>
+                <span>Squad Posts</span>
               </button>
 
               <button
@@ -591,20 +451,16 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
                 }`}
               >
                 <Sparkles size={13} />
-                <span>All Cohort Posts ({allProofsCount})</span>
+                <span>All Cohort Posts</span>
               </button>
             </div>
           ) : (
             <div className="px-3 py-1.5 rounded-xl bg-[#080B10] border border-[#20242C] text-xs font-semibold text-white flex items-center gap-1.5">
               <Sparkles size={13} className="text-[#3B82FF]" />
-              <span>All Daily Proofs ({allProofsCount})</span>
+              <span>All Daily Proofs</span>
             </div>
           )}
         </div>
-
-        <span className="text-[11px] font-mono text-[#9298A3]">
-          {filteredProofs.length} {filteredProofs.length === 1 ? 'Proof' : 'Proofs'}
-        </span>
       </div>
 
       {/* PROOF & DISCUSSION FEED - ALL PEOPLE'S PROOFS DISPLAYED CLEARLY */}
@@ -681,7 +537,7 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between px-1">
+                <div className="flex items-center justify-between px-1 flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => setActiveLightboxProof(proof)}
@@ -691,9 +547,30 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
                     <span>View Full Photo</span>
                   </button>
 
-                  <span className="text-[10px] font-mono text-[#9298A3]">
-                    ✓ Verified Evidence
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {proof.verified !== false ? (
+                      <span className="text-[10px] font-mono text-[#22C55E] flex items-center gap-1 bg-[#22C55E]/10 px-2 py-0.5 rounded-full border border-[#22C55E]/20">
+                        <Check size={11} />
+                        Verified by Moderator
+                      </span>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-mono text-[#F59E0B] flex items-center gap-1 bg-[#F59E0B]/10 px-2 py-0.5 rounded-full border border-[#F59E0B]/20">
+                          Pending Verification
+                        </span>
+                        {isModerator && (
+                          <button
+                            type="button"
+                            onClick={() => handleVerifyProof(proof.id)}
+                            className="text-[10px] font-semibold bg-[#2166FF] hover:bg-[#1a52cc] text-white px-2.5 py-1 rounded-full flex items-center gap-1 transition-all cursor-pointer shadow-sm"
+                          >
+                            <Check size={11} />
+                            Verify Photo
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

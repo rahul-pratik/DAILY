@@ -22,6 +22,7 @@ export const CreateChallengeModal: React.FC<CreateChallengeModalProps> = ({
   const [type, setType] = useState<'solo' | 'squad'>('solo');
   const [maxSquadSize, setMaxSquadSize] = useState('5');
   const [durationDays, setDurationDays] = useState('30');
+  const [difficulty, setDifficulty] = useState<NonNullable<Challenge['difficulty']>>('Medium');
   const [selectedTag, setSelectedTag] = useState('#Reading');
   const [icon, setIcon] = useState('book');
 
@@ -47,6 +48,7 @@ export const CreateChallengeModal: React.FC<CreateChallengeModalProps> = ({
       status: 'active',
       joined: true,
       durationDays: days,
+      difficulty,
       maxSquadSize: type === 'squad' ? (parseInt(maxSquadSize) || 5) : undefined,
       participantsCount: 1,
       squadMembers: [
@@ -284,6 +286,25 @@ export const CreateChallengeModal: React.FC<CreateChallengeModalProps> = ({
             <p className="text-[11px] text-[#9298A3] mt-1.5">
               Challenge targets daily consistency for {durationDays} consecutive days.
             </p>
+          </div>
+
+          <div>
+            <label
+              htmlFor="challenge-difficulty"
+              className="block text-[11px] font-semibold text-[#9298A3] uppercase tracking-wider mb-1.5"
+            >
+              Difficulty
+            </label>
+            <select
+              id="challenge-difficulty"
+              value={difficulty}
+              onChange={(e) => setDifficulty(e.target.value as NonNullable<Challenge['difficulty']>)}
+              className="w-full bg-[#101010] border border-[#20242C] rounded-xl px-3.5 py-2.5 text-white text-xs focus:outline-none focus:border-[#2166FF]"
+            >
+              <option value="Easy">Easy</option>
+              <option value="Medium">Medium</option>
+              <option value="Hard">Hard</option>
+            </select>
           </div>
 
           {/* Submit */}
