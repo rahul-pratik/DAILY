@@ -205,6 +205,42 @@ export const StorageService = {
     safeSet('daily_app_user_bookmarks', bookmarkedPostIds);
   },
 
+  // User Follows (Followed accounts & creators)
+  getUserFollows(userId?: string): string[] {
+    const key = userId ? `daily_app_user_follows_${userId}` : 'daily_app_user_follows';
+    return safeParse<string[]>(key, []);
+  },
+
+  saveUserFollows(followedIds: string[], userId?: string): void {
+    const key = userId ? `daily_app_user_follows_${userId}` : 'daily_app_user_follows';
+    safeSet(key, followedIds);
+    safeSet('daily_app_user_follows', followedIds);
+  },
+
+  isUserFollowed(targetIdOrUsername: string, userId?: string): boolean {
+    const follows = this.getUserFollows(userId);
+    const target = targetIdOrUsername.toLowerCase();
+    return follows.some((f) => f.toLowerCase() === target);
+  },
+
+  // Comment Votes (Thumbs Up / Thumbs Down)
+  getCommentVotes(userId?: string): Record<string, 'up' | 'down'> {
+    const key = userId ? `daily_app_comment_votes_${userId}` : 'daily_app_comment_votes';
+    return safeParse<Record<string, 'up' | 'down'>>(key, {});
+  },
+
+  saveCommentVote(commentId: string, vote: 'up' | 'down' | null, userId?: string): void {
+    const key = userId ? `daily_app_comment_votes_${userId}` : 'daily_app_comment_votes';
+    const current = this.getCommentVotes(userId);
+    if (!vote) {
+      delete current[commentId];
+    } else {
+      current[commentId] = vote;
+    }
+    safeSet(key, current);
+    safeSet('daily_app_comment_votes', current);
+  },
+
   // Purge any old fake mock challenges or communities stored in localStorage
   purgeMockData(): void {
     try {

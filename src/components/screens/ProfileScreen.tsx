@@ -351,7 +351,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             </button>
           ) : (
             <button
-              onClick={() => onToggleFollow?.(user.id)}
+              onClick={() => onToggleFollow?.(user.id || user.username)}
               className={`flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                 user.isFollowing
                   ? 'bg-[#101010] text-emerald-400 border border-[#20242C] hover:bg-[#1a1f29]'

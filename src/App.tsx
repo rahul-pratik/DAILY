@@ -191,6 +191,7 @@ export default function App() {
         userMembershipsRes,
         userTodosRes,
         allNotifsRes,
+        userFollowsRes,
       ] = await Promise.all([
         supabase.from('profiles').select('*').limit(150),
         supabase.from('posts').select('*').order('created_at', { ascending: false }),
@@ -209,25 +210,40 @@ export default function App() {
         activeAuthId
           ? supabase.from('notifications').select('*').eq('recipient_id', activeAuthId).order('created_at', { ascending: false }).limit(100)
           : Promise.resolve({ data: [] }),
+        activeAuthId
+          ? (supabase.from('follows').select('following_id').eq('follower_id', activeAuthId) as any).then((res: any) => res?.error ? { data: [] } : res).catch(() => ({ data: [] }))
+          : Promise.resolve({ data: [] }),
       ]);
 
-      // 1. Process profiles
+      // 1. Process profiles and follows
+      const effectiveUserId = activeAuthId || currentUser.id;
+      const remoteFollowsList = ((userFollowsRes?.data as any[]) || []).map((r: any) => r.following_id);
+      const localFollowsList = StorageService.getUserFollows(effectiveUserId);
+      const followedSet = new Set<string>([
+        ...remoteFollowsList,
+        ...localFollowsList.map((f: string) => f.toLowerCase()),
+      ]);
+
       const allDbProfiles = profilesRes.data || [];
       const profileMap = new Map<string, any>();
       allDbProfiles.forEach((p: any) => profileMap.set(p.id, p));
 
       if (allDbProfiles.length > 0) {
-        const mappedCreators: Author[] = allDbProfiles.map((p: any) => ({
-          id: p.id,
-          name: p.name || 'Builder',
-          username: p.username || 'builder',
-          avatar: p.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-          bio: p.bio || '',
-          followersCount: p.followers_count || 0,
-          followingCount: p.following_count || 0,
-          accountabilityHubPrivacy: (p.accountability_hub_privacy as 'public' | 'private') || 'public',
-          isCurrentUser: p.id === activeAuthId,
-        }));
+        const mappedCreators: Author[] = allDbProfiles.map((p: any) => {
+          const isFollowed = followedSet.has(p.id) || (p.username && followedSet.has(p.username.toLowerCase()));
+          return {
+            id: p.id,
+            name: p.name || 'Builder',
+            username: p.username || 'builder',
+            avatar: p.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+            bio: p.bio || '',
+            followersCount: p.followers_count || 0,
+            followingCount: p.following_count || 0,
+            accountabilityHubPrivacy: (p.accountability_hub_privacy as 'public' | 'private') || 'public',
+            isCurrentUser: p.id === activeAuthId,
+            isFollowing: isFollowed,
+          };
+        });
         setAllCreators(mappedCreators);
         StorageService.saveCreators(mappedCreators);
       }
@@ -300,15 +316,17 @@ export default function App() {
         }
       }
 
-      const effectiveUserId = activeAuthId || currentUser.id;
       const localLikedSet = new Set(StorageService.getUserLikes(effectiveUserId));
       const localBookmarkedSet = new Set(StorageService.getUserBookmarks(effectiveUserId));
 
       // 3. Process Comments grouped by post_id
+      const commentVotes = StorageService.getCommentVotes(effectiveUserId);
       const commentsByPost = new Map<string, any[]>();
       ((postCommentsRes.data as any[]) || []).forEach((c: any) => {
         const p = profileMap.get(c.author_id);
         const arr = commentsByPost.get(c.post_id) || [];
+        const vote = commentVotes[c.id] || null;
+        const upCount = Math.max(0, c.likes_count || 0);
         arr.push({
           id: c.id,
           author: {
@@ -320,7 +338,10 @@ export default function App() {
           },
           text: c.text,
           timestamp: new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          likes: c.likes_count || 0,
+          likes: upCount,
+          upvotes: upCount,
+          downvotes: 0,
+          userVote: vote,
         });
         commentsByPost.set(c.post_id, arr);
       });
@@ -379,6 +400,7 @@ export default function App() {
               username: authorProfile?.username || 'creator',
               avatar: authorProfile?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
               isCurrentUser: p.author_id === activeAuthId,
+              isFollowing: followedSet.has(p.author_id) || (authorProfile?.username && followedSet.has(authorProfile.username.toLowerCase())),
             },
             content: p.content,
             purpose: p.purpose,
@@ -1151,15 +1173,33 @@ export default function App() {
   };
 
   // Toggle follow user
-  const handleToggleFollow = (userIdOrUsername: string) => {
-    let targetUsername = '';
-    let nowFollowing = false;
+  const handleToggleFollow = async (userIdOrUsername: string) => {
+    const targetCreator = allCreators.find(
+      (c) => c.id === userIdOrUsername || c.username?.toLowerCase() === userIdOrUsername.toLowerCase()
+    ) || (viewingUser && (viewingUser.id === userIdOrUsername || viewingUser.username?.toLowerCase() === userIdOrUsername.toLowerCase()) ? viewingUser : null);
 
+    const targetId = targetCreator?.id || userIdOrUsername;
+    const targetUsername = targetCreator?.username || (userIdOrUsername.startsWith('@') ? userIdOrUsername.slice(1) : userIdOrUsername);
+
+    const activeUid = currentUser?.id;
+    const currentFollows = StorageService.getUserFollows(activeUid);
+    const isCurrentlyFollowed = currentFollows.some(
+      (f) => f.toLowerCase() === targetId.toLowerCase() || f.toLowerCase() === targetUsername.toLowerCase()
+    );
+    const nowFollowing = !isCurrentlyFollowed;
+
+    // Persist to StorageService
+    const updatedFollows = nowFollowing
+      ? Array.from(new Set([...currentFollows, targetId, targetUsername.toLowerCase()]))
+      : currentFollows.filter(
+          (f) => f.toLowerCase() !== targetId.toLowerCase() && f.toLowerCase() !== targetUsername.toLowerCase()
+        );
+    StorageService.saveUserFollows(updatedFollows, activeUid);
+
+    // Update creators list
     setAllCreators((prev) =>
       prev.map((c) => {
-        if (c.id === userIdOrUsername || c.username === userIdOrUsername) {
-          nowFollowing = !c.isFollowing;
-          targetUsername = c.username;
+        if (c.id === targetId || c.username?.toLowerCase() === targetUsername.toLowerCase()) {
           return {
             ...c,
             isFollowing: nowFollowing,
@@ -1170,15 +1210,13 @@ export default function App() {
       })
     );
 
+    // Update active viewing profile if applicable
     setViewingUser((prev) => {
-      if (prev.id === userIdOrUsername || prev.username === userIdOrUsername) {
-        const isFollowing = !prev.isFollowing;
-        nowFollowing = isFollowing;
-        targetUsername = prev.username;
+      if (prev.id === targetId || prev.username?.toLowerCase() === targetUsername.toLowerCase()) {
         return {
           ...prev,
-          isFollowing,
-          followersCount: isFollowing ? (prev.followersCount || 0) + 1 : Math.max(0, (prev.followersCount || 1) - 1),
+          isFollowing: nowFollowing,
+          followersCount: nowFollowing ? (prev.followersCount || 0) + 1 : Math.max(0, (prev.followersCount || 1) - 1),
         };
       }
       return prev;
@@ -1187,7 +1225,7 @@ export default function App() {
     // Update posts authored by this user
     setPosts((prev) =>
       prev.map((post) => {
-        if (post.author.id === userIdOrUsername || post.author.username === userIdOrUsername) {
+        if (post.author.id === targetId || post.author.username?.toLowerCase() === targetUsername.toLowerCase()) {
           return {
             ...post,
             author: {
@@ -1209,6 +1247,123 @@ export default function App() {
     }));
 
     showToast(nowFollowing ? `Now following @${targetUsername || userIdOrUsername}` : `Unfollowed @${targetUsername || userIdOrUsername}`);
+
+    // Persist to Supabase follows table
+    try {
+      const activeUserId = await getActiveAuthUserId();
+      if (activeUserId && isValidUUID(activeUserId) && isValidUUID(targetId)) {
+        if (nowFollowing) {
+          await supabase.from('follows').upsert({
+            follower_id: activeUserId,
+            following_id: targetId,
+          });
+        } else {
+          await supabase.from('follows').delete().match({
+            follower_id: activeUserId,
+            following_id: targetId,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Supabase follow sync notice:', e);
+    }
+  };
+
+  // Interactions: Thumbs Up / Thumbs Down Comment
+  const handleVoteComment = async (postId: string, commentId: string, direction: 'up' | 'down') => {
+    const activeUid = currentUser?.id;
+    const currentVotes = StorageService.getCommentVotes(activeUid);
+    const existingVote = currentVotes[commentId] || null;
+
+    let nextVote: 'up' | 'down' | null = direction;
+    let deltaUp = 0;
+    let deltaDown = 0;
+
+    if (existingVote === direction) {
+      nextVote = null;
+      if (direction === 'up') deltaUp = -1;
+      else deltaDown = -1;
+    } else if (existingVote) {
+      if (direction === 'up') {
+        deltaUp = 1;
+        deltaDown = -1;
+      } else {
+        deltaUp = -1;
+        deltaDown = 1;
+      }
+    } else {
+      if (direction === 'up') deltaUp = 1;
+      else deltaDown = 1;
+    }
+
+    StorageService.saveCommentVote(commentId, nextVote, activeUid);
+
+    // Update posts state comments
+    setPosts((prev) =>
+      prev.map((p) => {
+        if (p.id === postId) {
+          const updatedComments = (p.comments || []).map((c) => {
+            if (c.id === commentId) {
+              const curUp = c.upvotes ?? (c.likes > 0 ? c.likes : 0);
+              const curDown = c.downvotes ?? 0;
+              const newUp = Math.max(0, curUp + deltaUp);
+              const newDown = Math.max(0, curDown + deltaDown);
+              return {
+                ...c,
+                upvotes: newUp,
+                downvotes: newDown,
+                likes: newUp,
+                userVote: nextVote,
+              };
+            }
+            return c;
+          });
+          return {
+            ...p,
+            comments: updatedComments,
+          };
+        }
+        return p;
+      })
+    );
+
+    // Keep selectedPostForComments modal in sync
+    setSelectedPostForComments((prev) => {
+      if (!prev || prev.id !== postId) return prev;
+      const updatedComments = (prev.comments || []).map((c) => {
+        if (c.id === commentId) {
+          const curUp = c.upvotes ?? (c.likes > 0 ? c.likes : 0);
+          const curDown = c.downvotes ?? 0;
+          const newUp = Math.max(0, curUp + deltaUp);
+          const newDown = Math.max(0, curDown + deltaDown);
+          return {
+            ...c,
+            upvotes: newUp,
+            downvotes: newDown,
+            likes: newUp,
+            userVote: nextVote,
+          };
+        }
+        return c;
+      });
+      return {
+        ...prev,
+        comments: updatedComments,
+      };
+    });
+
+    // Update in Supabase post_comments if valid UUID
+    try {
+      if (isValidUUID(commentId)) {
+        const { data: cRow } = await supabase.from('post_comments').select('likes_count').eq('id', commentId).maybeSingle();
+        if (cRow) {
+          const newLikes = Math.max(0, (cRow.likes_count || 0) + deltaUp);
+          await supabase.from('post_comments').update({ likes_count: newLikes }).eq('id', commentId);
+        }
+      }
+    } catch (e) {
+      console.warn('Supabase comment vote sync notice:', e);
+    }
   };
 
   // Interactions: Credit / Like Post (Credit 'C')
@@ -3798,6 +3953,7 @@ export default function App() {
         onClose={() => setSelectedPostForComments(null)}
         onAddComment={handleAddComment}
         onDeleteComment={handleDeleteComment}
+        onVoteComment={handleVoteComment}
         onNavigateAuthorProfile={(author) => handleNavigateToUser(author)}
       />
 

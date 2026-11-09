@@ -86,6 +86,9 @@ export interface Comment {
   text: string;
   timestamp: string;
   likes: number;
+  upvotes?: number;
+  downvotes?: number;
+  userVote?: 'up' | 'down' | null;
 }
 
 export interface Post {

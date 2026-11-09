@@ -349,7 +349,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          onToggleFollow(post.author.id);
+                          onToggleFollow(post.author.id || post.author.username);
                         }}
                         className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all cursor-pointer ${
                           post.author.isFollowing

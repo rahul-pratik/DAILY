@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { X, Send, Trash2 } from 'lucide-react';
+import { X, Send, Trash2, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { Author, Comment, Post } from '../../types';
-import { CreditIcon } from '../CreditIcon';
 
 interface CommentsModalProps {
   post: Post | null;
@@ -9,6 +8,7 @@ interface CommentsModalProps {
   onClose: () => void;
   onAddComment: (postId: string, text: string) => void;
   onDeleteComment?: (postId: string, commentId: string) => void;
+  onVoteComment?: (postId: string, commentId: string, direction: 'up' | 'down') => void;
   onNavigateAuthorProfile?: (author: Author) => void;
 }
 
@@ -18,6 +18,7 @@ export const CommentsModal: React.FC<CommentsModalProps> = ({
   onClose,
   onAddComment,
   onDeleteComment,
+  onVoteComment,
   onNavigateAuthorProfile,
 }) => {
   const [commentText, setCommentText] = useState('');
@@ -110,10 +111,43 @@ export const CommentsModal: React.FC<CommentsModalProps> = ({
                 <p className="text-xs text-white/90 leading-relaxed mb-1">
                   {comment.text}
                 </p>
-                <div className="flex items-center justify-between text-[11px] text-[#9298A3]">
-                  <div className="flex items-center gap-1.5 text-[#3B82FF]">
-                    <CreditIcon size={13} credited className="text-[#3B82FF]" />
-                    <span className="tabular-nums font-mono text-[10px]">{comment.likes} credits</span>
+                <div className="flex items-center justify-between text-[11px] text-[#9298A3] pt-1">
+                  <div className="flex items-center gap-1.5">
+                    {/* Thumbs Up button */}
+                    <button
+                      type="button"
+                      onClick={() => onVoteComment?.(post.id, comment.id, 'up')}
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded-full transition-colors cursor-pointer text-xs ${
+                        comment.userVote === 'up'
+                          ? 'text-[#2166FF] bg-[#2166FF]/15 font-semibold'
+                          : 'text-[#9298A3] hover:text-white hover:bg-[#20242C]/60'
+                      }`}
+                      title="Thumbs Up"
+                    >
+                      <ThumbsUp size={12} className={comment.userVote === 'up' ? 'fill-[#2166FF]' : ''} />
+                      <span className="tabular-nums font-mono text-[10px]">
+                        {comment.upvotes ?? (comment.likes > 0 ? comment.likes : 0)}
+                      </span>
+                    </button>
+
+                    {/* Thumbs Down button */}
+                    <button
+                      type="button"
+                      onClick={() => onVoteComment?.(post.id, comment.id, 'down')}
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded-full transition-colors cursor-pointer text-xs ${
+                        comment.userVote === 'down'
+                          ? 'text-[#EF4444] bg-[#EF4444]/15 font-semibold'
+                          : 'text-[#9298A3] hover:text-white hover:bg-[#20242C]/60'
+                      }`}
+                      title="Thumbs Down"
+                    >
+                      <ThumbsDown size={12} className={comment.userVote === 'down' ? 'fill-[#EF4444]' : ''} />
+                      {(comment.downvotes ?? 0) > 0 && (
+                        <span className="tabular-nums font-mono text-[10px]">
+                          {comment.downvotes}
+                        </span>
+                      )}
+                    </button>
                   </div>
 
                   {Boolean(
@@ -123,7 +157,7 @@ export const CommentsModal: React.FC<CommentsModalProps> = ({
                     <button
                       type="button"
                       onClick={() => onDeleteComment(post.id, comment.id)}
-                      className="text-[#9298A3] hover:text-red-400 p-0.5 transition-colors cursor-pointer"
+                      className="text-[#9298A3] hover:text-red-400 p-1 rounded hover:bg-red-500/10 transition-colors cursor-pointer"
                       title="Delete your comment"
                     >
                       <Trash2 size={12} />
