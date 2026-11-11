@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Trophy, Flame, BookOpen, Code, Camera, Plus, Users, Target } from 'lucide-react';
 import { Challenge } from '../../types';
+import { StorageService } from '../../services/storageService';
 
 interface CreateChallengeModalProps {
   onClose: () => void;
@@ -25,8 +26,25 @@ export const CreateChallengeModal: React.FC<CreateChallengeModalProps> = ({
   const [difficulty, setDifficulty] = useState<NonNullable<Challenge['difficulty']>>('Medium');
   const [selectedTag, setSelectedTag] = useState('#Reading');
   const [icon, setIcon] = useState('book');
+  const [customHashtag, setCustomHashtag] = useState('');
+  const [isAddingHashtag, setIsAddingHashtag] = useState(false);
+  const [customTags, setCustomTags] = useState<string[]>(() => StorageService.getCustomHashtags());
 
-  const tagOptions = ['#Reading', '#Coding', '#Fitness', '#Habits', '#Building', '#Creativity'];
+  const defaultTagOptions = ['#Reading', '#Coding', '#Fitness', '#Habits', '#Building', '#Creativity'];
+  const allTagOptions = Array.from(new Set([...defaultTagOptions, ...customTags]));
+
+  const handleAddCustomTag = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customHashtag.trim()) return;
+    const formatted = customHashtag.trim().startsWith('#')
+      ? customHashtag.trim()
+      : `#${customHashtag.trim()}`;
+    const updated = StorageService.addCustomHashtag(formatted);
+    setCustomTags(updated);
+    setSelectedTag(formatted);
+    setCustomHashtag('');
+    setIsAddingHashtag(false);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -210,8 +228,8 @@ export const CreateChallengeModal: React.FC<CreateChallengeModalProps> = ({
             <label className="block text-[11px] font-semibold text-[#9298A3] uppercase tracking-wider mb-1.5">
               Tag / Discipline
             </label>
-            <div className="flex flex-wrap gap-1.5">
-              {tagOptions.map((tag) => (
+            <div className="flex flex-wrap gap-1.5 items-center">
+              {allTagOptions.map((tag) => (
                 <button
                   type="button"
                   key={tag}
@@ -243,6 +261,50 @@ export const CreateChallengeModal: React.FC<CreateChallengeModalProps> = ({
                   {tag}
                 </button>
               ))}
+
+              {!isAddingHashtag ? (
+                <button
+                  type="button"
+                  onClick={() => setIsAddingHashtag(true)}
+                  className="px-3 py-1.5 rounded-full text-xs font-medium transition-all cursor-pointer bg-[#2166FF]/10 text-[#3B82FF] hover:bg-[#2166FF]/20 border border-[#2166FF]/30 flex items-center gap-1"
+                >
+                  <Plus size={13} />
+                  <span>Make Your Own Hashtag</span>
+                </button>
+              ) : (
+                <div className="flex items-center gap-1.5 p-1 bg-[#101010] border border-[#2166FF]/40 rounded-full">
+                  <input
+                    type="text"
+                    value={customHashtag}
+                    onChange={(e) => setCustomHashtag(e.target.value)}
+                    placeholder="#MySprint"
+                    className="bg-transparent text-white text-xs px-2.5 py-0.5 outline-none font-mono w-28"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddCustomTag(e);
+                      } else if (e.key === 'Escape') {
+                        setIsAddingHashtag(false);
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddCustomTag}
+                    className="px-2.5 py-1 rounded-full bg-[#2166FF] text-white text-[10px] font-bold cursor-pointer"
+                  >
+                    Add
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingHashtag(false)}
+                    className="p-1 text-[#9298A3] hover:text-white cursor-pointer"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 

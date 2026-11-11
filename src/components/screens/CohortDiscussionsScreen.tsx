@@ -15,11 +15,14 @@ import {
   Check, 
   Upload, 
   X, 
-  Maximize2
+  Maximize2,
+  Bell,
+  BellOff
 } from 'lucide-react';
 import { Author, Challenge, CohortProof } from '../../types';
 import { getSafeUUID } from '../../lib/supabase';
 import { CreditIcon } from '../CreditIcon';
+import { StorageService } from '../../services/storageService';
 
 interface CohortDiscussionsScreenProps {
   challenge: Challenge;
@@ -52,6 +55,11 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
 }) => {
   const [selectedCohort, setSelectedCohort] = useState<Challenge>(challenge);
   const [viewMode, setViewMode] = useState<'list' | 'detail'>(initialViewMode);
+  const [isCohortMuted, setIsCohortMuted] = useState<boolean>(() => StorageService.isChallengeMuted(challenge.id));
+
+  useEffect(() => {
+    setIsCohortMuted(StorageService.isChallengeMuted(selectedCohort.id));
+  }, [selectedCohort.id]);
   
   // Photo proof form state
   const [proofNote, setProofNote] = useState('');
@@ -323,13 +331,33 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
           </div>
         </div>
 
-        {/* Switch cohort button */}
-        <button
-          onClick={() => setViewMode('list')}
-          className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#101010] hover:bg-[#1f242e] border border-[#20242C] text-[#9298A3] hover:text-white transition-colors cursor-pointer shrink-0"
-        >
-          <span>Back to list</span>
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Mute Cohort Notifications Toggle */}
+          <button
+            type="button"
+            onClick={() => {
+              const nowMuted = StorageService.toggleMuteChallenge(selectedCohort.id);
+              setIsCohortMuted(nowMuted);
+            }}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors cursor-pointer ${
+              isCohortMuted
+                ? 'bg-red-500/15 border-red-500/30 text-red-400 hover:bg-red-500/25'
+                : 'bg-[#2166FF]/20 border-[#2166FF]/40 text-[#3B82FF] hover:bg-[#2166FF]/30'
+            }`}
+            title={isCohortMuted ? "Cohort notifications muted. Click to unmute" : "Cohort notifications active. Click to mute"}
+          >
+            {isCohortMuted ? <BellOff size={13} /> : <Bell size={13} />}
+            <span>{isCohortMuted ? 'Muted' : 'Mute'}</span>
+          </button>
+
+          {/* Switch cohort button */}
+          <button
+            onClick={() => setViewMode('list')}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#101010] hover:bg-[#1f242e] border border-[#20242C] text-[#9298A3] hover:text-white transition-colors cursor-pointer"
+          >
+            <span>Back to list</span>
+          </button>
+        </div>
       </div>
 
       {/* DAILY PHOTO PROOF SUBMISSION CARD */}
@@ -486,17 +514,13 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
                     >
                       {proof.author.name}
                     </button>
-                    {!proof.author.isCurrentUser && proof.author.username !== currentUser.username && onToggleFollow && (
+                    {!proof.author.isCurrentUser && proof.author.username !== currentUser.username && !proof.author.isFollowing && onToggleFollow && (
                       <button
                         type="button"
-                        onClick={() => onToggleFollow(proof.author.id)}
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all cursor-pointer ${
-                          proof.author.isFollowing
-                            ? 'bg-[#101010] text-[#9298A3] border border-[#20242C] hover:text-white'
-                            : 'bg-[#2166FF]/20 hover:bg-[#2166FF] text-[#3B82FF] hover:text-white border border-[#2166FF]/30'
-                        }`}
+                        onClick={() => onToggleFollow(proof.author.id || proof.author.username)}
+                        className="px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all cursor-pointer bg-[#2166FF]/20 hover:bg-[#2166FF] text-[#3B82FF] hover:text-white border border-[#2166FF]/30"
                       >
-                        {proof.author.isFollowing ? 'Following' : '+ Follow'}
+                        + Follow
                       </button>
                     )}
                   </div>
@@ -581,18 +605,19 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
                 type="button"
                 onClick={() => handleToggleLikeProof(proof.id)}
                 className={`flex items-center gap-1.5 transition-colors cursor-pointer group ${
-                  proof.isLiked ? 'text-[#2166FF]' : 'hover:text-white'
+                  proof.isLiked ? 'text-amber-400 font-semibold' : 'hover:text-amber-300'
                 }`}
-                aria-label={proof.isLiked ? 'Remove credit' : 'Give credit'}
-                title={proof.isLiked ? 'Credited' : 'Give credit (C)'}
+                aria-label={proof.isLiked ? 'Remove golden credit' : 'Give golden credit (C)'}
+                title={proof.isLiked ? 'Credited (Golden)' : 'Give golden credit (C)'}
               >
                 <CreditIcon
                   size={15}
                   credited={proof.isLiked}
-                  className={proof.isLiked ? 'text-[#2166FF]' : 'text-[#9298A3] group-hover:text-white'}
+                  variant="challenge"
+                  className={proof.isLiked ? 'text-amber-400' : 'text-[#9298A3] group-hover:text-amber-300'}
                 />
-                <span className="font-mono tabular-nums font-semibold">{proof.likesCount}</span>
-                <span className="text-[10px] text-[#8A92A6]">credits</span>
+                <span className="font-mono tabular-nums font-semibold text-white">{proof.likesCount}</span>
+                <span className="text-[10px] text-amber-400/90 font-medium">credits</span>
               </button>
 
               <span className="text-[11px] text-[#9298A3] font-mono">

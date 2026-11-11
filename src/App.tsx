@@ -376,6 +376,8 @@ export default function App() {
       });
 
       // 5. Process Posts
+      let finalMergedPosts: Post[] = [];
+      let commPostsFromDb: CommunityPost[] = [];
       const dbPosts = postsRes.data || [];
       if (dbPosts.length > 0) {
         const mappedRemotePosts: Post[] = dbPosts.map((p: any) => {
@@ -430,6 +432,7 @@ export default function App() {
               username: authorProfile?.username || 'creator',
               avatar: authorProfile?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
               isCurrentUser: p.author_id === activeAuthId,
+              isFollowing: myFollows.has(p.author_id) || Boolean(authorProfile?.username && myFollows.has(authorProfile.username)),
             },
             content: p.content,
             purpose: p.purpose,
@@ -456,13 +459,18 @@ export default function App() {
             const reg = StorageService.getCommentsForPost(p.id);
             const existing = new Set((p.comments || []).map((c) => c.id));
             const merged = [...(p.comments || []), ...reg.filter((c) => !existing.has(c.id))];
+            const isAuthorFollowed = myFollows.has(p.author.id) || Boolean(p.author.username && myFollows.has(p.author.username));
             return {
               ...p,
+              author: {
+                ...p.author,
+                isFollowing: isAuthorFollowed,
+              },
               comments: merged,
               commentsCount: Math.max(p.commentsCount, merged.length),
             };
           });
-        const finalMergedPosts = [...mappedRemotePosts, ...nonSyncedLocal];
+        finalMergedPosts = [...mappedRemotePosts, ...nonSyncedLocal];
 
         setPosts(finalMergedPosts);
         StorageService.savePosts(finalMergedPosts);
@@ -477,7 +485,7 @@ export default function App() {
         });
 
         // Also map community discussions from db into communityPosts
-        const commPostsFromDb: CommunityPost[] = dbPosts
+        commPostsFromDb = dbPosts
           .filter((p: any) => p.community_id)
           .map((p: any) => {
             const authorProfile = profileMap.get(p.author_id);
@@ -518,6 +526,9 @@ export default function App() {
         const mergedCommPosts = [...commPostsFromDb, ...localCommPosts.filter(cp => !remoteCommPostIds.has(cp.id))];
         setCommunityPosts(mergedCommPosts);
         StorageService.saveCommunityPosts(mergedCommPosts);
+      } else {
+        finalMergedPosts = StorageService.getPosts() || [];
+        commPostsFromDb = StorageService.getCommunityPosts() || [];
       }
 
       // 6. Process Cohort Proofs
@@ -681,15 +692,108 @@ export default function App() {
         };
       });
 
+      const followingPostNotifs: NotificationItem[] = finalMergedPosts
+        .filter((p: Post) => {
+          const isMe = p.author.id === activeAuthId || p.author.username === currentUser.username;
+          if (isMe) return false;
+          return myFollows.has(p.author.id) || Boolean(p.author.username && myFollows.has(p.author.username));
+        })
+        .slice(0, 15)
+        .map((p: Post) => ({
+          id: `notif-post-${p.id}`,
+          user: p.author,
+          action: 'shared a new post',
+          target: p.content.slice(0, 60),
+          time: p.timestamp,
+          read: false,
+          type: 'post' as const,
+          postId: p.id,
+        }));
+
+      const joinedChallengeIdSet = new Set(
+        (challengesRes.data || [])
+          .filter((c: any) => joinedChallengeIds.has(c.id) || c.is_joined)
+          .map((c: any) => c.id)
+      );
+      (StorageService.getChallenges() || []).filter((c) => c.joined || (c as any).isJoined).forEach((c) => joinedChallengeIdSet.add(c.id));
+
+      const challengeProofNotifs: NotificationItem[] = [];
+      ((cohortProofsRes.data as any[]) || []).forEach((cp: any) => {
+        if (joinedChallengeIdSet.has(cp.challenge_id)) {
+          const authorProf = profileMap.get(cp.user_id);
+          const isMe = cp.user_id === activeAuthId || authorProf?.username === currentUser.username;
+          if (!isMe) {
+            const chTitle = (challengesRes.data || []).find((c: any) => c.id === cp.challenge_id)?.title || 'Sprint';
+            challengeProofNotifs.push({
+              id: `notif-proof-${cp.id}`,
+              user: {
+                id: cp.user_id,
+                name: authorProf?.name || 'Challenger',
+                username: authorProf?.username || 'challenger',
+                avatar: authorProf?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
+                isCurrentUser: false,
+              },
+              action: `logged Day ${cp.day_number || 1} proof in "${chTitle}"`,
+              target: cp.note || 'Verified Daily Check-in',
+              time: new Date(cp.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              read: false,
+              type: 'challenge_proof' as const,
+              challengeId: cp.challenge_id,
+            });
+          }
+        }
+      });
+
+      const joinedCommIdSet = new Set(joinedCommunityIds);
+      (StorageService.getCommunities() || []).filter((c) => c.isJoined).forEach((c) => joinedCommIdSet.add(c.id));
+
+      const commPostNotifs: NotificationItem[] = commPostsFromDb
+        .filter((cp: CommunityPost) => {
+          const isMe = cp.author.id === activeAuthId || cp.author.username === currentUser.username;
+          if (isMe) return false;
+          return joinedCommIdSet.has(cp.communityId);
+        })
+        .slice(0, 15)
+        .map((cp) => ({
+          id: `notif-comm-${cp.id}`,
+          user: {
+            id: cp.author.id || '',
+            name: cp.author.name,
+            username: cp.author.username,
+            avatar: cp.author.avatar || '',
+            isCurrentUser: false,
+          },
+          action: `posted in "${cp.communityName || 'Community'}"`,
+          target: cp.title || cp.content.slice(0, 60),
+          time: cp.timestamp,
+          read: false,
+          type: 'community_post' as const,
+          communityId: cp.communityId,
+          postId: cp.id,
+        }));
+
       const remoteNotifIds = new Set(mappedNotifs.map((n) => n.id));
       const unsyncedLocalNotifs = localNotifs.filter((ln) => !remoteNotifIds.has(ln.id));
-      const finalNotifs = [...mappedNotifs, ...unsyncedLocalNotifs];
+      const combinedNotifs = [
+        ...mappedNotifs,
+        ...unsyncedLocalNotifs,
+        ...followingPostNotifs,
+        ...challengeProofNotifs,
+        ...commPostNotifs,
+      ];
+      const seenNotifIds = new Set<string>();
+      const finalNotifs = combinedNotifs.filter((n) => {
+        if (seenNotifIds.has(n.id)) return false;
+        seenNotifIds.add(n.id);
+        return true;
+      });
 
       setNotifications(finalNotifs);
       StorageService.saveNotifications(finalNotifs);
 
       // 10. Process Squads & Ensure Squad Owner is ALWAYS in Squad Roster!
-      const dbSquads = squadsRes.data || [];
+      const deletedSquadIds = new Set(StorageService.getDeletedSquadIds());
+      const dbSquads = (squadsRes.data || []).filter((sq: any) => !deletedSquadIds.has(sq.id));
       if (dbSquads.length > 0) {
         const dbMembers = squadMembersRes.data || [];
         const membersBySquad = new Map<string, any[]>();
@@ -737,7 +841,7 @@ export default function App() {
             category: sq.category,
             requiredSize: sq.required_size || 2,
             challengeId: sq.challenge_id,
-            challengeTitle: sq.challenge_id ? (dbChallenges?.find((c: any) => c.id === sq.challenge_id)?.title || 'Squad Sprint') : undefined,
+            challengeTitle: sq.challenge_id ? ((challengesRes.data || []).find((c: any) => c.id === sq.challenge_id)?.title || 'Squad Sprint') : undefined,
             creator: {
               name: creatorProfile?.name || 'Squad Lead',
               username: creatorProfile?.username || 'leader',
@@ -747,7 +851,7 @@ export default function App() {
           };
         });
 
-        const localSquads = StorageService.getSquads() || [];
+        const localSquads = (StorageService.getSquads() || []).filter((s) => !deletedSquadIds.has(s.id));
         const remoteSquadIds = new Set(mappedSquads.map((s) => s.id));
         const mergedSquads = mappedSquads;
         const extraLocalSquads = localSquads.filter((s) => !remoteSquadIds.has(s.id));
@@ -1952,7 +2056,6 @@ export default function App() {
 
     setCommunityPosts((prev) => [newCommPost, ...prev.filter((item) => item.id !== discId)]);
 
-    // Also mirror to general posts feed with community tag
     const mappedPurpose: PurposeLabel = category === 'Question'
       ? 'Question'
       : category === 'Advice'
@@ -1964,22 +2067,26 @@ export default function App() {
       : 'Progress';
 
     const fullContent = post.title ? `${post.title}\n\n${post.content}` : (post.content || '');
-    const newPost: Post = {
-      id: discId,
-      author: currentUser,
-      timestamp: 'Just now',
-      purpose: post.isDailyProof ? 'Progress' : mappedPurpose,
-      content: fullContent,
-      communityId: targetCommId,
-      communityName: targetComm?.name,
-      isDailyProof: post.isDailyProof,
-      likesCount: 1,
-      commentsCount: 0,
-      isLiked: true,
-      isSaved: false,
-    };
 
-    setPosts((prev) => [newPost, ...prev.filter((item) => item.id !== discId)]);
+    // Also mirror to general posts feed with community tag if cross-posting is enabled
+    if (StorageService.getCrossPostToFeed()) {
+      const newPost: Post = {
+        id: discId,
+        author: currentUser,
+        timestamp: 'Just now',
+        purpose: post.isDailyProof ? 'Progress' : mappedPurpose,
+        content: fullContent,
+        communityId: targetCommId,
+        communityName: targetComm?.name,
+        isDailyProof: post.isDailyProof,
+        likesCount: 1,
+        commentsCount: 0,
+        isLiked: true,
+        isSaved: false,
+      };
+
+      setPosts((prev) => [newPost, ...prev.filter((item) => item.id !== discId)]);
+    }
 
     showToast(`✓ Posted ${category.toLowerCase()} to ${targetComm?.name || 'Community'}!`);
 
@@ -2009,18 +2116,20 @@ export default function App() {
           return;
         }
 
-        const { error: postError } = await supabase.from('posts').insert({
-          id: discId,
-          author_id: safeAuthorId,
-          community_id: safeCommId,
-          content: fullContent,
-          purpose: mappedPurpose,
-          likes_count: 1,
-          comments_count: 0,
-        });
-        if (postError) {
-          reportCloudSyncError('community post', postError);
-          return;
+        if (StorageService.getCrossPostToFeed()) {
+          const { error: postError } = await supabase.from('posts').insert({
+            id: discId,
+            author_id: safeAuthorId,
+            community_id: safeCommId,
+            content: fullContent,
+            purpose: mappedPurpose,
+            likes_count: 1,
+            comments_count: 0,
+          });
+          if (postError) {
+            reportCloudSyncError('community post', postError);
+            return;
+          }
         }
 
         const { error: voteError } = await supabase.from('post_credits').upsert({
@@ -3394,20 +3503,25 @@ export default function App() {
   };
 
   const handleDeleteSquad = async (squadId: string) => {
+    // 1. Mark in permanent deleted set so it never resurrects
+    StorageService.addDeletedSquadId(squadId);
+
+    // 2. Filter local squads and messages
     setSquads((prev) => {
       const filtered = prev.filter((sq) => sq.id !== squadId);
       StorageService.saveSquads(filtered);
       return filtered;
     });
 
+    setSquadChatMessages((prev) => prev.filter((m) => m.squadId !== squadId));
+
     showToast('Squad deleted');
 
     try {
-      const activeUserId = await getActiveAuthUserId();
-      if (activeUserId) {
-        const safeId = toDeterministicUUID(squadId);
-        await supabase.from('squads').delete().eq('id', safeId);
-      }
+      const targetId = isValidUUID(squadId) ? squadId : toDeterministicUUID(squadId);
+      await supabase.from('squad_chat_messages').delete().eq('squad_id', targetId);
+      await supabase.from('squad_members').delete().eq('squad_id', targetId);
+      await supabase.from('squads').delete().eq('id', targetId);
     } catch (e) {
       console.warn('Supabase squad delete error:', e);
     }
@@ -3423,7 +3537,10 @@ export default function App() {
     const targetCh = challenges.find((c) => c.id === challengeId);
     const dayNumber = (targetCh?.current || 0) + 1;
 
-    if (addAsDailyProof) {
+    // Setting check: cross-post to normal feed or keep in challenge cohort only
+    const shouldCrossPost = StorageService.getCrossPostToFeed();
+
+    if (addAsDailyProof && shouldCrossPost) {
       const proofPostId = getSafeUUID();
       const contentText = note.trim()
         ? `${note.trim()}\n\n[Verified Daily Proof • Day ${dayNumber} of ${targetCh?.title || 'Challenge'}]`
@@ -3519,17 +3636,65 @@ export default function App() {
 
   const handleToggleHubPrivacy = (targetPrivacy?: 'public' | 'private') => {
     const nextPrivacy = targetPrivacy || (currentUser.accountabilityHubPrivacy === 'private' ? 'public' : 'private');
-    setCurrentUser((prev) => ({
-      ...prev,
+    const updatedUser: Author = {
+      ...currentUser,
       accountabilityHubPrivacy: nextPrivacy,
-    }));
+    };
+    setCurrentUser(updatedUser);
+    StorageService.saveCurrentUser(updatedUser);
+
+    setAccountabilityHubUser((prev) => {
+      if (prev.id === currentUser.id || prev.username === currentUser.username) {
+        return updatedUser;
+      }
+      return prev;
+    });
+
     if (viewingUser.id === currentUser.id || viewingUser.username === currentUser.username) {
-      setViewingUser((prev) => ({
-        ...prev,
-        accountabilityHubPrivacy: nextPrivacy,
-      }));
+      setViewingUser(updatedUser);
     }
+
+    setAllCreators((prev) =>
+      prev.map((c) =>
+        c.id === currentUser.id || c.username.toLowerCase() === currentUser.username.toLowerCase()
+          ? { ...c, accountabilityHubPrivacy: nextPrivacy }
+          : c
+      )
+    );
+
+    getActiveAuthUserId().then(async (userId) => {
+      if (userId) {
+        await supabase.from('profiles').update({
+          accountability_hub_privacy: nextPrivacy,
+        }).eq('id', userId);
+      }
+    }).catch((e) => console.warn('Hub privacy sync notice:', e));
+
     showToast(`Accountability Hub visibility set to ${nextPrivacy.toUpperCase()}`);
+  };
+
+  const handleSelectNotification = (notif: NotificationItem) => {
+    setIsNotificationsOpen(false);
+    if (notif.type === 'challenge_proof' && notif.challengeId) {
+      const targetChallenge = challenges.find((c) => c.id === notif.challengeId);
+      if (targetChallenge) {
+        handleOpenCohortDiscussions(targetChallenge, 'detail');
+      } else {
+        setCurrentScreen('challenges');
+      }
+    } else if (notif.type === 'community_post' && notif.communityId) {
+      const targetCommunity = communities.find((c) => c.id === notif.communityId);
+      if (targetCommunity) {
+        handleOpenCommunityHub(targetCommunity);
+      } else {
+        setCurrentScreen('communities');
+      }
+    } else if (notif.type === 'post') {
+      setCurrentScreen('home');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else if (notif.squadInvitation) {
+      setCurrentScreen('challenges');
+    }
   };
 
   const handleOnboardingComplete = (
@@ -4104,6 +4269,7 @@ export default function App() {
           onMarkAllRead={handleMarkAllNotificationsRead}
           onAcceptSquadInvite={handleAcceptSquadInvite}
           onDeclineSquadInvite={handleDeclineSquadInvite}
+          onSelectNotification={handleSelectNotification}
         />
       )}
 

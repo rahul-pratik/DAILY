@@ -645,8 +645,10 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                   <div className="flex items-center gap-1.5 shrink-0">
                     {/* Creator delete button */}
                     {Boolean(
-                      (squad.creator?.username && currentUser?.username && squad.creator.username.toLowerCase() === currentUser.username.toLowerCase()) ||
-                      (squad as any)?.creatorId === currentUser?.id
+                      (squad.creator?.username && currentUser?.username && squad.creator.username.toLowerCase().replace(/^@/, '') === currentUser.username.toLowerCase().replace(/^@/, '')) ||
+                      (squad.creator as any)?.id === currentUser?.id ||
+                      (squad as any)?.creatorId === currentUser?.id ||
+                      squad.members?.some(m => m.role === 'creator' && (m.id === currentUser?.id || (m.username && currentUser?.username && m.username.toLowerCase().replace(/^@/, '') === currentUser.username.toLowerCase().replace(/^@/, ''))))
                     ) && onDeleteSquad && (
                       <button
                         type="button"
@@ -845,17 +847,13 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                               Member
                             </span>
 
-                            {member.username !== currentUser?.username && onToggleFollow && (
+                            {member.username !== currentUser?.username && !member.isFollowing && onToggleFollow && (
                               <button
                                 type="button"
                                 onClick={() => onToggleFollow(member.id || member.username)}
-                                className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all shrink-0 cursor-pointer ${
-                                  member.isFollowing
-                                    ? 'bg-[#141822] text-[#8A92A6] border border-[#202738]'
-                                    : 'bg-[#2166FF]/20 text-[#3B82FF] hover:bg-[#2166FF] hover:text-white'
-                                }`}
+                                className="px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all shrink-0 cursor-pointer bg-[#2166FF]/20 text-[#3B82FF] hover:bg-[#2166FF] hover:text-white"
                               >
-                                {member.isFollowing ? 'Following' : '+ Follow'}
+                                + Follow
                               </button>
                             )}
                           </div>

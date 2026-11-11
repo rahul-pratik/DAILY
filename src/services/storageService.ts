@@ -13,6 +13,12 @@ const KEYS = {
   CREATORS: 'daily_app_creators',
   SQUADS: 'daily_app_squads',
   COMMENTS_REGISTRY: 'daily_app_comments_registry',
+  MUTED_CHALLENGES: 'daily_app_muted_challenges',
+  MUTED_COMMUNITIES: 'daily_app_muted_communities',
+  MUTED_USERS: 'daily_app_muted_users',
+  DELETED_SQUADS: 'daily_app_deleted_squads',
+  CROSS_POST_TO_FEED: 'daily_app_cross_post_to_feed',
+  CUSTOM_HASHTAGS: 'daily_app_custom_hashtags',
 };
 
 // Safe JSON parser
@@ -299,6 +305,96 @@ export const StorageService = {
     if (changed) {
       safeSet(KEYS.COMMENTS_REGISTRY, registry);
     }
+  },
+
+  // Notification Muting Preferences
+  getMutedChallenges(): string[] {
+    return safeParse<string[]>(KEYS.MUTED_CHALLENGES, []);
+  },
+
+  isChallengeMuted(challengeId: string): boolean {
+    return this.getMutedChallenges().includes(challengeId);
+  },
+
+  toggleMuteChallenge(challengeId: string): boolean {
+    const list = this.getMutedChallenges();
+    const isMuted = list.includes(challengeId);
+    const updated = isMuted ? list.filter((id) => id !== challengeId) : [...list, challengeId];
+    safeSet(KEYS.MUTED_CHALLENGES, updated);
+    return !isMuted;
+  },
+
+  getMutedCommunities(): string[] {
+    return safeParse<string[]>(KEYS.MUTED_COMMUNITIES, []);
+  },
+
+  isCommunityMuted(communityId: string): boolean {
+    return this.getMutedCommunities().includes(communityId);
+  },
+
+  toggleMuteCommunity(communityId: string): boolean {
+    const list = this.getMutedCommunities();
+    const isMuted = list.includes(communityId);
+    const updated = isMuted ? list.filter((id) => id !== communityId) : [...list, communityId];
+    safeSet(KEYS.MUTED_COMMUNITIES, updated);
+    return !isMuted;
+  },
+
+  getMutedUsers(): string[] {
+    return safeParse<string[]>(KEYS.MUTED_USERS, []);
+  },
+
+  isUserMuted(userIdOrUsername: string): boolean {
+    const list = this.getMutedUsers().map((u) => u.toLowerCase().replace(/^@/, ''));
+    const target = userIdOrUsername.toLowerCase().replace(/^@/, '');
+    return list.includes(target);
+  },
+
+  toggleMuteUser(userIdOrUsername: string): boolean {
+    const target = userIdOrUsername.toLowerCase().replace(/^@/, '');
+    const list = this.getMutedUsers().map((u) => u.toLowerCase().replace(/^@/, ''));
+    const isMuted = list.includes(target);
+    const updated = isMuted ? list.filter((u) => u !== target) : [...list, target];
+    safeSet(KEYS.MUTED_USERS, updated);
+    return !isMuted;
+  },
+
+  // Deleted Squads Registry
+  getDeletedSquadIds(): string[] {
+    return safeParse<string[]>(KEYS.DELETED_SQUADS, []);
+  },
+
+  addDeletedSquadId(squadId: string): void {
+    const list = this.getDeletedSquadIds();
+    if (!list.includes(squadId)) {
+      safeSet(KEYS.DELETED_SQUADS, [...list, squadId]);
+    }
+  },
+
+  // Cross-Post to Home Feed Setting
+  getCrossPostToFeed(): boolean {
+    return safeParse<boolean>(KEYS.CROSS_POST_TO_FEED, true);
+  },
+
+  setCrossPostToFeed(enabled: boolean): void {
+    safeSet(KEYS.CROSS_POST_TO_FEED, enabled);
+  },
+
+  // Custom Hashtags Registry
+  getCustomHashtags(): string[] {
+    return safeParse<string[]>(KEYS.CUSTOM_HASHTAGS, []);
+  },
+
+  addCustomHashtag(tag: string): string[] {
+    const cleaned = tag.trim().startsWith('#') ? tag.trim() : `#${tag.trim()}`;
+    if (!cleaned || cleaned === '#') return this.getCustomHashtags();
+    const existing = this.getCustomHashtags();
+    if (!existing.some((t) => t.toLowerCase() === cleaned.toLowerCase())) {
+      const updated = [...existing, cleaned];
+      safeSet(KEYS.CUSTOM_HASHTAGS, updated);
+      return updated;
+    }
+    return existing;
   },
 
   clearDemoContent(): void {

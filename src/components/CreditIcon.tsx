@@ -4,23 +4,46 @@ interface CreditIconProps {
   size?: number;
   className?: string;
   credited?: boolean;
+  variant?: 'normal' | 'challenge' | 'community' | 'golden' | 'green' | 'blue';
 }
 
 interface DiscreditIconProps {
   size?: number;
   className?: string;
   discredited?: boolean;
+  variant?: 'normal' | 'challenge' | 'community' | 'golden' | 'green' | 'blue';
 }
 
 /**
  * CreditIcon - Stylized 'C' credit coin emblem
  * Used across the platform to replace likes with Credits (C).
+ * Normal: Blue C | Challenge: Golden C | Community: Green C
  */
 export const CreditIcon: React.FC<CreditIconProps> = ({
   size = 18,
   className = '',
   credited = false,
+  variant = 'normal',
 }) => {
+  const isGolden = variant === 'challenge' || variant === 'golden';
+  const isGreen = variant === 'community' || variant === 'green';
+
+  const fillColor = credited
+    ? isGolden
+      ? '#EAB308'
+      : isGreen
+      ? '#10B981'
+      : '#2166FF'
+    : 'transparent';
+
+  const strokeColor = credited
+    ? isGolden
+      ? '#FACC15'
+      : isGreen
+      ? '#34D399'
+      : '#3B82FF'
+    : 'currentColor';
+
   return (
     <svg
       width={size}
@@ -38,8 +61,8 @@ export const CreditIcon: React.FC<CreditIconProps> = ({
         cx="12"
         cy="12"
         r="9.5"
-        fill={credited ? '#2166FF' : 'transparent'}
-        stroke={credited ? '#3B82FF' : 'currentColor'}
+        fill={fillColor}
+        stroke={strokeColor}
         strokeWidth="1.75"
       />
       {/* Stylized, bold uppercase 'C' emblem */}

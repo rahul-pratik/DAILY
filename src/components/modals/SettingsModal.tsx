@@ -12,7 +12,8 @@ import {
   LogOut,
   LogIn,
   AlertTriangle,
-  UserX
+  UserX,
+  Share2
 } from 'lucide-react';
 import { Author } from '../../types';
 import { isSupabaseConfigured } from '../../lib/supabase';
@@ -41,6 +42,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const authSession = StorageService.getAuthSession();
   const [deleteAccountConfirmed, setDeleteAccountConfirmed] = useState(false);
   const [resetContentConfirmed, setResetContentConfirmed] = useState(false);
+  const [crossPostToFeed, setCrossPostToFeed] = useState<boolean>(() => StorageService.getCrossPostToFeed());
 
   return (
     <div
@@ -157,6 +159,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             ) : (
               <span className="text-[11px] font-mono text-[#9298A3]">{isPrivate ? 'Private' : 'Public'}</span>
             )}
+          </div>
+
+          {/* Cross-Posting Preferences (Communities & Challenges to Normal Feed) */}
+          <div className="p-3.5 rounded-2xl bg-[#101010] border border-[#20242C] flex items-center justify-between">
+            <div className="flex items-center gap-3 min-w-0 pr-2">
+              <Share2 size={18} className="text-[#3B82FF] shrink-0" />
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-white">Cross-Post to Normal Feed</p>
+                <p className="text-[11px] text-[#9298A3] leading-tight mt-0.5">
+                  Post items from challenges or communities as normal posts
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const nextVal = !crossPostToFeed;
+                StorageService.setCrossPostToFeed(nextVal);
+                setCrossPostToFeed(nextVal);
+              }}
+              className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer shrink-0 ${
+                crossPostToFeed
+                  ? 'bg-[#2166FF]/20 text-[#3B82FF] border border-[#2166FF]/35 hover:bg-[#2166FF]/30'
+                  : 'bg-[#181D28] text-[#9298A3] border border-[#242C3D] hover:text-white'
+              }`}
+            >
+              {crossPostToFeed ? 'Enabled' : 'Disabled'}
+            </button>
           </div>
 
           {/* Supabase Schema Status */}

@@ -24,10 +24,15 @@ import {
   CheckCircle2,
   Share2,
   Trash2,
-  Sparkles
+  Sparkles,
+  Bell,
+  BellOff,
+  Info,
+  X
 } from 'lucide-react';
 import { Author, Challenge, Community, Post } from '../../types';
 import { CreditIcon, isCommunityOrChallengePost } from '../CreditIcon';
+import { StorageService } from '../../services/storageService';
 
 interface ProfileScreenProps {
   user: Author;
@@ -81,6 +86,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [hubPrivacy, setHubPrivacy] = useState<'public' | 'private'>(user.accountabilityHubPrivacy || 'public');
   const [privateHubAlert, setPrivateHubAlert] = useState(false);
   const [postToDelete, setPostToDelete] = useState<Post | null>(null);
+  const [showCreditsBreakdown, setShowCreditsBreakdown] = useState(false);
+  const [isMuted, setIsMuted] = useState<boolean>(() => StorageService.isUserMuted(user.id || user.username));
 
   // Check if viewing own profile
   const isSelf = Boolean(
@@ -98,6 +105,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     }
   }, [user.accountabilityHubPrivacy]);
 
+  React.useEffect(() => {
+    setIsMuted(StorageService.isUserMuted(user.id || user.username));
+  }, [user.id, user.username]);
+
   // Filter posts written by this user (case-insensitive username or ID)
   const userPosts = posts.filter(
     (p) =>
@@ -106,14 +117,55 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   );
   const savedPosts = posts.filter((p) => p.isSaved);
 
-  // Total credits accumulated over each post written by this user
-  const totalCreditsAccumulated = React.useMemo(() => {
-    let credits = 0;
+  // Categorized Credits Breakdown: Blue (Normal), Golden (Challenges), Green (Communities)
+  const creditsBreakdown = React.useMemo(() => {
+    let blue = 0;
+    let golden = 0;
+    let green = 0;
+
     userPosts.forEach((p) => {
-      credits += (p.creditsCount ?? p.likesCount ?? 0);
+      const count = p.creditsCount ?? p.likesCount ?? 0;
+      if (p.communityId || p.communityName) {
+        green += count;
+      } else if ((p as any).challengeId || p.challengeTitle || p.isDailyProof || (p.proofDay && p.proofDay > 0)) {
+        golden += count;
+      } else {
+        blue += count;
+      }
     });
-    return credits;
-  }, [userPosts]);
+
+    // Also include credits from challenge cohort proofs submitted by this user
+    challenges.forEach((ch) => {
+      ch.squadProofs?.forEach((proof) => {
+        if (
+          (proof.author?.username && user.username && proof.author.username.toLowerCase() === user.username.toLowerCase()) ||
+          (proof.author?.id && user.id && proof.author.id === user.id)
+        ) {
+          golden += (proof.likesCount || 0);
+        }
+      });
+    });
+
+    // Also include credits from community posts
+    const commPosts = StorageService.getCommunityPosts() || [];
+    commPosts.forEach((cp) => {
+      if (
+        (cp.author?.username && user.username && cp.author.username.toLowerCase() === user.username.toLowerCase()) ||
+        (cp.author?.id && user.id && cp.author.id === user.id)
+      ) {
+        // avoid double counting if already in userPosts
+        const alreadyCounted = userPosts.some(p => p.id === cp.id);
+        if (!alreadyCounted) {
+          green += (cp.upvotes || cp.credits || 0);
+        }
+      }
+    });
+
+    const total = blue + golden + green;
+    return { blue, golden, green, total };
+  }, [userPosts, challenges, user.username, user.id]);
+
+  const totalCreditsAccumulated = creditsBreakdown.total;
 
   // Filter following users for this profile
   const followingUsers = React.useMemo(() => {
@@ -258,7 +310,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           )}
         </div>
 
-        {/* Name, Handle & Credits Badge (replacing following count) */}
+        {/* Name, Handle & Total Credits Badge with Breakdown Click */}
         <div className="mb-2">
           <h2 className="text-xl font-bold text-white tracking-tight leading-tight">
             {user.name}
@@ -266,11 +318,17 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <p className="text-xs text-[#9298A3] font-mono">@{user.username}</p>
             <span className="text-[#9298A3]/50">·</span>
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#2166FF]/15 border border-[#2166FF]/30 text-[#3B82FF]">
-              <CreditIcon size={12} credited className="text-[#3B82FF]" />
+            <button
+              type="button"
+              onClick={() => setShowCreditsBreakdown(!showCreditsBreakdown)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-gradient-to-r from-[#2166FF]/20 via-amber-500/15 to-emerald-500/20 hover:from-[#2166FF]/30 hover:to-emerald-500/30 border border-[#2166FF]/35 text-white transition-all cursor-pointer shadow-sm group"
+              title="Click to view full credits breakdown (Blue, Golden, Green)"
+            >
+              <CreditIcon size={12} credited variant="normal" />
               <span className="text-xs font-mono font-bold tabular-nums text-white">{totalCreditsAccumulated}</span>
-              <span className="text-[11px] font-medium text-[#8A92A6]">credits</span>
-            </div>
+              <span className="text-[11px] font-medium text-[#8A92A6] group-hover:text-white">total credits</span>
+              <ChevronRight size={11} className="text-[#9298A3] group-hover:translate-x-0.5 transition-transform" />
+            </button>
           </div>
         </div>
 
@@ -326,15 +384,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           )}
         </div>
 
-        {/* PRIMARY ACTIONS: ACCOUNTABILITY HUB BUTTON + (EDIT PROFILE OR FOLLOW) */}
-        <div className="grid grid-cols-2 gap-2.5 mb-4">
+        {/* PRIMARY ACTIONS: ACCOUNTABILITY HUB BUTTON + (EDIT PROFILE OR FOLLOW & MUTE) */}
+        <div className={`grid ${isSelf ? 'grid-cols-2' : 'grid-cols-[1fr_1fr_auto]'} gap-2.5 mb-4`}>
           {/* Button to show Accountability Hub */}
           <button
             onClick={handleAccountabilityHubClick}
             className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-semibold bg-[#2166FF] hover:bg-[#3B82FF] active:scale-95 text-white shadow-md shadow-[#2166FF]/25 transition-all cursor-pointer"
           >
             <Calendar size={15} />
-            <span>Accountability Hub</span>
+            <span className="truncate">Accountability Hub</span>
           </button>
 
           {/* Edit Profile (Self) OR Follow (Other user) */}
@@ -347,17 +405,37 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
               <span>Edit Profile</span>
             </button>
           ) : (
-            <button
-              onClick={() => onToggleFollow?.(user.id)}
-              className={`flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                user.isFollowing
-                  ? 'bg-[#101010] text-emerald-400 border border-[#20242C] hover:bg-[#1a1f29]'
-                  : 'bg-[#101010] hover:bg-[#20242C] text-white border border-[#20242C]'
-              }`}
-            >
-              {user.isFollowing ? <Check size={14} /> : <UserPlus size={14} />}
-              <span>{user.isFollowing ? 'Following' : 'Follow'}</span>
-            </button>
+            <>
+              <button
+                onClick={() => onToggleFollow?.(user.id)}
+                className={`flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                  user.isFollowing
+                    ? 'bg-[#101010] text-emerald-400 border border-[#20242C] hover:bg-[#1a1f29]'
+                    : 'bg-[#101010] hover:bg-[#20242C] text-white border border-[#20242C]'
+                }`}
+              >
+                {user.isFollowing ? <Check size={14} /> : <UserPlus size={14} />}
+                <span>{user.isFollowing ? 'Following' : 'Follow'}</span>
+              </button>
+
+              {/* Mute Notifications for this user */}
+              <button
+                type="button"
+                onClick={() => {
+                  const nowMuted = StorageService.toggleMuteUser(user.id || user.username);
+                  setIsMuted(nowMuted);
+                }}
+                className={`flex items-center justify-center px-3 py-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+                  isMuted
+                    ? 'bg-red-500/15 border-red-500/30 text-red-400 hover:bg-red-500/25'
+                    : 'bg-[#101010] border-[#20242C] text-[#9298A3] hover:text-white hover:bg-[#1a1f29]'
+                }`}
+                title={isMuted ? `Notifications from @${user.username} are muted. Click to unmute.` : `Mute notifications from @${user.username}`}
+                aria-label="Mute notifications"
+              >
+                {isMuted ? <BellOff size={15} /> : <Bell size={15} />}
+              </button>
+            </>
           )}
         </div>
 
@@ -508,7 +586,31 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                       </span>
                     )}
                   </div>
-                  <span className="text-xs text-[#9298A3] font-mono">{post.timestamp}</span>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-[#9298A3] font-mono">{post.timestamp}</span>
+
+                    {/* Delete button: in top right corner of that post */}
+                    {Boolean(
+                      currentUser && (
+                        (post.author.id && currentUser.id && post.author.id === currentUser.id) ||
+                        (post.author.username && currentUser.username && post.author.username.toLowerCase() === currentUser.username.toLowerCase())
+                      )
+                    ) && onDeletePost && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPostToDelete(post);
+                        }}
+                        className="p-1.5 rounded-full text-[#9298A3] hover:text-red-400 hover:bg-red-500/15 transition-colors cursor-pointer"
+                        title="Delete post"
+                        aria-label="Delete post"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <p className="text-xs text-white leading-relaxed line-clamp-3 mb-3">
@@ -539,28 +641,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                   </div>
 
                   <div className="flex items-center gap-1.5">
-                    {/* Delete button: strictly ONLY for posts written by currentUser */}
-                    {Boolean(
-                      currentUser && (
-                        (post.author.id && currentUser.id && post.author.id === currentUser.id) ||
-                        (post.author.username && currentUser.username && post.author.username.toLowerCase() === currentUser.username.toLowerCase())
-                      )
-                    ) && onDeletePost && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPostToDelete(post);
-                        }}
-                        className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-colors cursor-pointer"
-                        title="Delete post"
-                        aria-label="Delete post"
-                      >
-                        <Trash2 size={12} />
-                        <span className="text-[11px]">Delete</span>
-                      </button>
-                    )}
-
                     <button
                       type="button"
                       onClick={(e) => {
@@ -813,6 +893,123 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                 Yes, Delete Post
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Credits Breakdown Modal */}
+      {showCreditsBreakdown && (
+        <div 
+          onClick={() => setShowCreditsBreakdown(false)}
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-3xl bg-[#090C13] border border-[#202738] p-5 shadow-2xl space-y-4"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-[#20242C]">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#2166FF]/20 via-amber-500/20 to-emerald-500/20 border border-[#202738] flex items-center justify-center">
+                  <CreditIcon size={16} credited variant="normal" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Credit Portfolio</h3>
+                  <p className="text-[10px] text-[#9298A3]">Categorized credit balance breakdown</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCreditsBreakdown(false)}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-[#9298A3] hover:text-white hover:bg-[#141926] transition-colors cursor-pointer"
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            {/* Total Balance Card */}
+            <div className="p-3.5 rounded-2xl bg-gradient-to-r from-[#2166FF]/15 via-[#0d121c] to-emerald-500/15 border border-[#202738] flex items-center justify-between">
+              <div>
+                <p className="text-[10px] uppercase tracking-wider font-semibold text-[#9298A3]">Total Credits Accumulated</p>
+                <p className="text-2xl font-bold font-mono text-white mt-0.5">{creditsBreakdown.total}</p>
+              </div>
+              <div className="flex -space-x-1.5">
+                <span className="w-6 h-6 rounded-full bg-[#2166FF] flex items-center justify-center text-white text-[10px] font-bold border-2 border-[#090C13]">C</span>
+                <span className="w-6 h-6 rounded-full bg-[#EAB308] flex items-center justify-center text-black text-[10px] font-bold border-2 border-[#090C13]">C</span>
+                <span className="w-6 h-6 rounded-full bg-[#10B981] flex items-center justify-center text-white text-[10px] font-bold border-2 border-[#090C13]">C</span>
+              </div>
+            </div>
+
+            {/* 3 Categories Breakdown List */}
+            <div className="space-y-2.5">
+              {/* 1. Blue Credits */}
+              <div className="p-3 rounded-2xl bg-[#10141F] border border-[#2166FF]/30 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-[#2166FF]/20 border border-[#2166FF]/40 flex items-center justify-center shrink-0">
+                    <CreditIcon size={16} credited variant="normal" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-white">Blue Credits</span>
+                      <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.2 rounded bg-[#2166FF]/25 text-[#3B82FF]">Feed</span>
+                    </div>
+                    <p className="text-[10px] text-[#9298A3] truncate">Normal posts & personal achievements</p>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="text-sm font-bold font-mono text-[#3B82FF]">{creditsBreakdown.blue}</span>
+                  <span className="text-[10px] text-[#8A92A6] block">credits</span>
+                </div>
+              </div>
+
+              {/* 2. Golden Credits */}
+              <div className="p-3 rounded-2xl bg-[#18150B] border border-amber-500/35 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0">
+                    <CreditIcon size={16} credited variant="challenge" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-white">Golden Credits</span>
+                      <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.2 rounded bg-amber-500/25 text-amber-400">Challenges</span>
+                    </div>
+                    <p className="text-[10px] text-[#9298A3] truncate">Challenge proofs & consistency sprints</p>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="text-sm font-bold font-mono text-amber-400">{creditsBreakdown.golden}</span>
+                  <span className="text-[10px] text-[#8A92A6] block">credits</span>
+                </div>
+              </div>
+
+              {/* 3. Green Credits */}
+              <div className="p-3 rounded-2xl bg-[#091712] border border-emerald-500/35 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shrink-0">
+                    <CreditIcon size={16} credited variant="community" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-white">Green Credits</span>
+                      <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.2 rounded bg-emerald-500/25 text-emerald-400">Communities</span>
+                    </div>
+                    <p className="text-[10px] text-[#9298A3] truncate">Community discussions & shared insights</p>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="text-sm font-bold font-mono text-emerald-400">{creditsBreakdown.green}</span>
+                  <span className="text-[10px] text-[#8A92A6] block">credits</span>
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowCreditsBreakdown(false)}
+              className="w-full py-2.5 rounded-xl bg-[#141926] hover:bg-[#1E2433] text-xs font-semibold text-white transition-colors cursor-pointer"
+            >
+              Close
+            </button>
           </div>
         </div>
       )}

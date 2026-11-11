@@ -39,6 +39,7 @@ export interface CommunityPost {
     username: string;
     avatar?: string;
     isMod?: boolean;
+    isFollowing?: boolean;
   };
   title: string;
   content: string;
@@ -236,7 +237,7 @@ export interface NotificationItem {
   target: string;
   time: string;
   read: boolean;
-  type?: 'like' | 'comment' | 'follow' | 'squad_invitation' | 'squad_entry';
+  type?: 'like' | 'comment' | 'follow' | 'squad_invitation' | 'squad_entry' | 'post' | 'challenge_proof' | 'community_post';
   squadInvitation?: {
     squadId: string;
     squadName: string;
@@ -244,4 +245,7 @@ export interface NotificationItem {
     requiredMembers: number;
     status: 'pending' | 'accepted' | 'declined';
   };
+  challengeId?: string;
+  communityId?: string;
+  postId?: string;
 }

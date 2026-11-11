@@ -3,6 +3,7 @@ import {
   ArrowLeft, 
   Search, 
   Bell, 
+  BellOff,
   BookOpen, 
   Plus, 
   ChevronDown, 
@@ -25,6 +26,7 @@ import { Author, Community, CommunityPost, Post } from '../../types';
 import { CommunityModeratorModal } from '../modals/CommunityModeratorModal';
 import { CreditIcon, DiscreditIcon } from '../CreditIcon';
 import { getSafeUUID, toDeterministicUUID } from '../../lib/supabase';
+import { StorageService } from '../../services/storageService';
 
 interface CommunityHubScreenProps {
   community: Community;
@@ -73,7 +75,7 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
   const [showSearchInput, setShowSearchInput] = useState(false);
   const [newPostText, setNewPostText] = useState('');
   const [isGuidelinesOpen, setIsGuidelinesOpen] = useState(false);
-  const [notificationsActive, setNotificationsActive] = useState(false);
+  const [isMuted, setIsMuted] = useState<boolean>(() => StorageService.isCommunityMuted(community.id));
   
   // Moderator Modal State
   const [isModModalOpen, setIsModModalOpen] = useState(false);
@@ -293,18 +295,21 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
             </button>
           )}
 
-          {/* Notification Bell */}
+          {/* Notification Mute / Unmute Toggle */}
           <button
-            onClick={() => setNotificationsActive(!notificationsActive)}
+            onClick={() => {
+              const nowMuted = StorageService.toggleMuteCommunity(community.id);
+              setIsMuted(nowMuted);
+            }}
             className={`w-9 h-9 rounded-full border flex items-center justify-center transition-colors cursor-pointer ${
-              notificationsActive
-                ? 'bg-[#2166FF]/20 border-[#2166FF] text-[#3B82FF]'
-                : 'bg-[#101010] hover:bg-[#1a1f29] border-[#20242C] text-[#9298A3] hover:text-white'
+              isMuted
+                ? 'bg-red-500/15 border-red-500/30 text-red-400 hover:bg-red-500/25'
+                : 'bg-[#2166FF]/20 border-[#2166FF]/40 text-[#3B82FF] hover:bg-[#2166FF]/30'
             }`}
-            aria-label="Community Notifications"
-            title={notificationsActive ? "Notifications enabled" : "Enable notifications"}
+            aria-label="Community Notifications Mute Toggle"
+            title={isMuted ? "Notifications Muted. Click to Unmute" : "Notifications Active. Click to Mute"}
           >
-            <Bell size={16} />
+            {isMuted ? <BellOff size={16} /> : <Bell size={16} />}
           </button>
 
           {/* Guidelines Book Icon / Pill */}
@@ -538,32 +543,34 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
           return (
             <div
               key={post.id}
-              className="p-4 rounded-3xl bg-[#080B10] border border-[#20242C] transition-all flex gap-3.5 group"
+              className="p-3.5 sm:p-4 rounded-2xl sm:rounded-3xl bg-[#080B10] border border-[#20242C] transition-all flex flex-col xs:flex-row gap-3 sm:gap-3.5 group w-full max-w-full overflow-hidden"
             >
-              {/* Left Credits & Discredits Column */}
-              <div className="flex flex-col items-center justify-center bg-[#101010]/90 border border-[#20242C] rounded-2xl p-2 shrink-0 self-start min-w-[54px] gap-1">
-                {/* Credit (C) Button */}
+              {/* Left Credits & Discredits Bar (Mobile responsive: row on small screens, col on larger) */}
+              <div className="flex flex-row xs:flex-col items-center justify-between xs:justify-center bg-[#101010]/90 border border-[#20242C] rounded-2xl p-1.5 xs:p-2 shrink-0 self-stretch xs:self-start w-full xs:w-auto xs:min-w-[52px] gap-2 xs:gap-1">
+                {/* Credit (C) Button - Green for communities */}
                 <button
                   onClick={() => handleVote(post.id, 'up')}
                   className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all cursor-pointer ${
                     post.userVote === 'up'
-                      ? 'text-[#2166FF] bg-[#2166FF]/20 border border-[#2166FF]/40 shadow-sm shadow-[#2166FF]/25'
-                      : 'text-[#9298A3] hover:text-white hover:bg-[#1a1f29] border border-transparent'
+                      ? 'text-emerald-400 bg-emerald-500/20 border border-emerald-500/40 shadow-sm shadow-emerald-500/25'
+                      : 'text-[#9298A3] hover:text-emerald-400 hover:bg-[#1a1f29] border border-transparent'
                   }`}
-                  aria-label={post.userVote === 'up' ? 'Remove credit' : 'Give credit (C)'}
-                  title={post.userVote === 'up' ? 'Credited' : 'Credit (C)'}
+                  aria-label={post.userVote === 'up' ? 'Remove credit' : 'Give credit (Green C)'}
+                  title={post.userVote === 'up' ? 'Credited (Green)' : 'Credit (Green C)'}
                 >
-                  <CreditIcon size={17} credited={post.userVote === 'up'} />
+                  <CreditIcon size={17} credited={post.userVote === 'up'} variant="community" />
                 </button>
 
-                <span className="text-xs font-bold font-mono tabular-nums text-white">
-                  {post.upvotes}
-                </span>
-                <span className="text-[8px] font-semibold text-[#8A92A6] uppercase tracking-wider">
-                  Credits
-                </span>
+                <div className="flex xs:flex-col items-center gap-1 xs:gap-0">
+                  <span className="text-xs font-bold font-mono tabular-nums text-white">
+                    {post.upvotes}
+                  </span>
+                  <span className="text-[8px] font-semibold text-emerald-400/90 uppercase tracking-wider">
+                    Credits
+                  </span>
+                </div>
 
-                {/* Discredit (DC) Button */}
+                {/* Discredit (DC) Button - Red for communities */}
                 <button
                   onClick={() => handleVote(post.id, 'down')}
                   className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all cursor-pointer ${
@@ -571,8 +578,8 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
                       ? 'text-red-400 bg-red-500/20 border border-red-500/40 shadow-sm shadow-red-500/25'
                       : 'text-[#9298A3] hover:text-red-400 hover:bg-[#1a1f29] border border-transparent'
                   }`}
-                  aria-label={post.userVote === 'down' ? 'Remove discredit' : 'Discredit (DC)'}
-                  title={post.userVote === 'down' ? 'Discredited' : 'Discredit (DC)'}
+                  aria-label={post.userVote === 'down' ? 'Remove discredit' : 'Discredit (Red DC)'}
+                  title={post.userVote === 'down' ? 'Discredited (Red)' : 'Discredit (Red DC)'}
                 >
                   <DiscreditIcon size={17} discredited={post.userVote === 'down'} />
                 </button>
@@ -608,11 +615,11 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
                         </span>
                       )}
 
-                      {/* Follow Button for Community Post Author */}
-                      {post.author.username !== currentUser.username && onToggleFollow && (
+                      {/* Follow Button for Community Post Author: ONLY shown if not yet following */}
+                      {post.author.username !== currentUser.username && !post.author.isFollowing && onToggleFollow && (
                         <button
                           type="button"
-                          onClick={() => onToggleFollow(post.author.username)}
+                          onClick={() => onToggleFollow(post.author.id || post.author.username)}
                           className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#2166FF]/20 hover:bg-[#2166FF] text-[#3B82FF] hover:text-white border border-[#2166FF]/30 transition-all cursor-pointer"
                         >
                           + Follow

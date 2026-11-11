@@ -343,21 +343,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                       {post.author.username}
                     </button>
 
-                    {/* Follow button in Home Screen posts */}
-                    {!post.author.isCurrentUser && post.author.username !== currentUser.username && onToggleFollow && (
+                    {/* Follow button in Home Screen posts: ONLY shown if not yet following */}
+                    {!post.author.isCurrentUser && post.author.username !== currentUser.username && !post.author.isFollowing && onToggleFollow && (
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           onToggleFollow(post.author.id || post.author.username);
                         }}
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all cursor-pointer ${
-                          post.author.isFollowing
-                            ? 'bg-[#101010] text-[#9298A3] border border-[#20242C] hover:text-white hover:border-[#3B82FF]'
-                            : 'bg-[#2166FF]/20 hover:bg-[#2166FF] text-[#3B82FF] hover:text-white border border-[#2166FF]/40'
-                        }`}
+                        className="px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all cursor-pointer bg-[#2166FF]/20 hover:bg-[#2166FF] text-[#3B82FF] hover:text-white border border-[#2166FF]/40"
                       >
-                        {post.author.isFollowing ? 'Following' : '+ Follow'}
+                        + Follow
                       </button>
                     )}
                   </div>
