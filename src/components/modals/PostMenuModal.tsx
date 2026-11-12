@@ -10,6 +10,7 @@ interface PostMenuModalProps {
   onCopyLink: (post: Post) => void;
   onOpenShareToCommunity?: (post: Post) => void;
   onDeletePost?: (postId: string) => void;
+  isModerator?: boolean;
 }
 
 export const PostMenuModal: React.FC<PostMenuModalProps> = ({
@@ -20,6 +21,7 @@ export const PostMenuModal: React.FC<PostMenuModalProps> = ({
   onCopyLink,
   onOpenShareToCommunity,
   onDeletePost,
+  isModerator = false,
 }) => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   if (!post) return null;
@@ -135,7 +137,7 @@ export const PostMenuModal: React.FC<PostMenuModalProps> = ({
           </button>
 
           {/* Feature 2: Author Delete Post button */}
-          {isAuthor && onDeletePost && (
+          {(isAuthor || isModerator) && onDeletePost && (
             <div className="pt-2 mt-1 border-t border-[#20242C]">
               {!showDeleteConfirm ? (
                 <button
@@ -148,7 +150,11 @@ export const PostMenuModal: React.FC<PostMenuModalProps> = ({
                 </button>
               ) : (
                 <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 space-y-2">
-                  <p className="text-xs text-red-300 font-medium">Delete this post permanently?</p>
+                  <p className="text-xs text-red-300 font-medium">
+                    {isModerator && !isAuthor
+                      ? 'Remove this post from the challenge permanently?'
+                      : 'Delete this post permanently?'}
+                  </p>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"

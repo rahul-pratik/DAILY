@@ -38,6 +38,7 @@ interface ChallengesScreenProps {
   onCheckIn?: (challengeId: string) => void;
   onNavigateUser: (user: { name: string; username: string }) => void;
   onOpenCohortDiscussions: (challenge?: Challenge, mode?: 'list' | 'detail') => void;
+  onOpenSquadChats?: (squad?: Squad, mode?: 'list' | 'detail') => void;
   onAddToTodoList?: (challenge: Challenge) => void;
   onToggleFollow?: (userId: string) => void;
   toDoChallengeIds?: string[];
@@ -51,6 +52,8 @@ interface ChallengesScreenProps {
   onDeleteChallenge?: (challengeId: string) => void;
   squadChatMessages?: SquadChatMessage[];
   onSendSquadMessage?: (squadId: string, text: string) => void;
+  onToggleSquadReaction?: (squadId: string, messageId: string, emoji: string) => void;
+  onMarkSquadMessagesAsRead?: (squadId: string) => void;
 }
 
 export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
@@ -62,6 +65,7 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
   onOpenCreateChallenge,
   onNavigateUser,
   onOpenCohortDiscussions,
+  onOpenSquadChats,
   onAddToTodoList,
   onToggleFollow,
   toDoChallengeIds = [],
@@ -75,6 +79,8 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
   onDeleteChallenge,
   squadChatMessages: syncedSquadChatMessages,
   onSendSquadMessage,
+  onToggleSquadReaction,
+  onMarkSquadMessagesAsRead,
 }) => {
   // Top 3-tab view mode: 'challenges' | 'squad_chat' | 'manage_squads'
   const [viewMode, setViewMode] = useState<'challenges' | 'squad_chat' | 'manage_squads'>('challenges');
@@ -868,30 +874,65 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
       ) : (
         /* ================= 3. ALL CHALLENGES VIEW (MINIMALIST & CLEAN) ================= */
         <div className="space-y-4 animate-fade-in">
-          {/* Cohort Discussions Entry Banner */}
-          <div 
-            onClick={() => onOpenCohortDiscussions(undefined, 'list')}
-            className="p-3.5 rounded-2xl bg-[#090C13] hover:bg-[#0E121B] border border-[#1C2230] hover:border-[#2166FF]/40 transition-all flex items-center justify-between gap-3 cursor-pointer group"
-          >
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-[#121622] border border-[#202738] flex items-center justify-center text-[#3B82FF] shrink-0 group-hover:scale-105 transition-transform">
-                <MessageSquare size={17} />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-white group-hover:text-[#3B82FF] transition-colors truncate">
-                    Challenge Cohort Discussions
-                  </span>
-                  <span className="text-[10px] font-semibold text-[#3B82FF] bg-[#2166FF]/15 px-1.5 py-0.5 rounded-full">
-                    Active
-                  </span>
+          {/* Cohort Discussions & Squad Team Chats Dual Banners */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {/* Cohort Discussions Entry Banner */}
+            <div
+              onClick={() => onOpenCohortDiscussions(undefined, 'list')}
+              className="p-3.5 rounded-2xl bg-[#090C13] hover:bg-[#0E121B] border border-[#1C2230] hover:border-[#2166FF]/40 transition-all flex items-center justify-between gap-3 cursor-pointer group shadow-sm"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-[#121622] border border-[#202738] flex items-center justify-center text-[#3B82FF] shrink-0 group-hover:scale-105 transition-transform">
+                  <MessageSquare size={17} />
                 </div>
-                <p className="text-[11px] text-[#8A92A6] truncate">
-                  View cohorts, submit daily photo proofs & chat with team
-                </p>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-white group-hover:text-[#3B82FF] transition-colors truncate">
+                      Cohort Discussions
+                    </span>
+                    <span className="text-[10px] font-semibold text-[#3B82FF] bg-[#2166FF]/15 px-1.5 py-0.5 rounded-full">
+                      Active
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[#8A92A6] truncate">
+                    View cohorts, submit daily photo proofs & track progress
+                  </p>
+                </div>
               </div>
+              <ChevronRight size={17} className="text-[#8A92A6] group-hover:text-white shrink-0 transition-colors" />
             </div>
-            <ChevronRight size={17} className="text-[#8A92A6] group-hover:text-white shrink-0 transition-colors" />
+
+            {/* Squad Team Chats Entry Banner */}
+            <div
+              onClick={() => {
+                if (onOpenSquadChats) {
+                  onOpenSquadChats(undefined, 'list');
+                } else {
+                  setViewMode('squad_chat');
+                }
+              }}
+              className="p-3.5 rounded-2xl bg-[#090C13] hover:bg-[#0E121B] border border-[#1C2230] hover:border-[#2166FF]/40 transition-all flex items-center justify-between gap-3 cursor-pointer group shadow-sm"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-[#121622] border border-[#202738] flex items-center justify-center text-[#3B82FF] shrink-0 group-hover:scale-105 transition-transform">
+                  <Users size={17} />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-white group-hover:text-[#3B82FF] transition-colors truncate">
+                      Squad Team Chats
+                    </span>
+                    <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/15 px-1.5 py-0.5 rounded-full">
+                      Squads
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[#8A92A6] truncate">
+                    Open squad chat rooms, strategy & live updates
+                  </p>
+                </div>
+              </div>
+              <ChevronRight size={17} className="text-[#8A92A6] group-hover:text-white shrink-0 transition-colors" />
+            </div>
           </div>
 
 

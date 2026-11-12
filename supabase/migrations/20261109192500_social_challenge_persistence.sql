@@ -50,7 +50,6 @@ CREATE TABLE IF NOT EXISTS public.post_credits (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
   CONSTRAINT unique_user_post_credit UNIQUE (post_id, user_id)
 );
-
 CREATE INDEX IF NOT EXISTS idx_post_credits_post_id ON public.post_credits(post_id);
 CREATE INDEX IF NOT EXISTS idx_post_credits_user_id ON public.post_credits(user_id);
 
@@ -296,4 +295,216 @@ CREATE POLICY "Users can delete own Daily media"
   USING (
     bucket_id IN ('avatars', 'posts', 'proofs')
     AND (storage.foldername(name))[1] = auth.uid()::TEXT
+  );
+
+-- Squad chat read receipts
+ALTER TABLE public.squad_chat_messages
+  ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ;
+
+-- Squad message reactions
+CREATE TABLE IF NOT EXISTS public.message_reactions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  message_id UUID NOT NULL REFERENCES public.squad_chat_messages(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  emoji VARCHAR(32) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+  CONSTRAINT unique_user_message_emoji UNIQUE (message_id, user_id, emoji)
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_reactions_message ON public.message_reactions(message_id);
+CREATE INDEX IF NOT EXISTS idx_message_reactions_user ON public.message_reactions(user_id);
+
+ALTER TABLE public.message_reactions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public can view message reactions" ON public.message_reactions;
+CREATE POLICY "Public can view message reactions"
+  ON public.message_reactions FOR SELECT USING (TRUE);
+DROP POLICY IF EXISTS "Users can add own message reactions" ON public.message_reactions;
+CREATE POLICY "Users can add own message reactions"
+  ON public.message_reactions FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can remove own message reactions" ON public.message_reactions;
+CREATE POLICY "Users can remove own message reactions"
+  ON public.message_reactions FOR DELETE TO authenticated
+  USING (auth.uid() = user_id);
+
+-- Persist globally reusable topic tags with case-insensitive uniqueness.
+CREATE TABLE IF NOT EXISTS public.topic_hashtags (
+  tag_key TEXT PRIMARY KEY,
+  tag TEXT NOT NULL,
+  created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+  CONSTRAINT topic_hashtags_key_matches_tag CHECK (tag_key = LOWER(tag))
+);
+
+ALTER TABLE public.topic_hashtags ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Anyone can view topic hashtags" ON public.topic_hashtags;
+CREATE POLICY "Anyone can view topic hashtags"
+  ON public.topic_hashtags FOR SELECT USING (TRUE);
+DROP POLICY IF EXISTS "Authenticated users can create topic hashtags" ON public.topic_hashtags;
+CREATE POLICY "Authenticated users can create topic hashtags"
+  ON public.topic_hashtags FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = created_by AND tag_key = LOWER(tag));
+
+-- Link feed posts to their challenge so moderators can manage its posts and comments.
+ALTER TABLE public.posts
+  ADD COLUMN IF NOT EXISTS challenge_id UUID REFERENCES public.challenges(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS feed_visible BOOLEAN NOT NULL DEFAULT TRUE;
+
+DROP POLICY IF EXISTS "Challenge moderators can delete challenge posts" ON public.posts;
+CREATE POLICY "Challenge moderators can delete challenge posts"
+  ON public.posts FOR DELETE TO authenticated
+  USING (
+    auth.uid() = author_id
+    OR EXISTS (
+      SELECT 1 FROM public.challenges c
+      WHERE c.id = posts.challenge_id AND c.creator_id = auth.uid()
+    )
+    OR EXISTS (
+      SELECT 1 FROM public.communities c
+      WHERE c.id = posts.community_id AND c.creator_id = auth.uid()
+    )
+  );
+
+DROP POLICY IF EXISTS "Authors or post owners can delete comments" ON public.post_comments;
+CREATE POLICY "Authors or post owners can delete comments"
+  ON public.post_comments FOR DELETE TO authenticated
+  USING (
+    auth.uid() = author_id
+    OR EXISTS (
+      SELECT 1 FROM public.posts p
+      WHERE p.id = post_comments.post_id AND (
+        p.author_id = auth.uid()
+        OR EXISTS (
+          SELECT 1 FROM public.challenges c
+          WHERE c.id = p.challenge_id AND c.creator_id = auth.uid()
+        )
+        OR EXISTS (
+          SELECT 1 FROM public.communities c
+          WHERE c.id = p.community_id AND c.creator_id = auth.uid()
+        )
+      )
+    )
+  );
+
+DROP POLICY IF EXISTS "Challenge creators can delete cohort proofs" ON public.cohort_proofs;
+CREATE POLICY "Challenge creators can delete cohort proofs"
+  ON public.cohort_proofs FOR DELETE TO authenticated
+  USING (
+    auth.uid() = author_id
+    OR EXISTS (
+      SELECT 1 FROM public.challenges c
+      WHERE c.id = cohort_proofs.challenge_id AND c.creator_id = auth.uid()
+    )
+  );
+
+DROP POLICY IF EXISTS "Squad members can mark messages as read" ON public.squad_chat_messages;
+CREATE POLICY "Squad members can mark messages as read"
+  ON public.squad_chat_messages FOR UPDATE TO authenticated
+  USING (
+    sender_id <> auth.uid()
+    AND read_at IS NULL
+    AND (EXISTS (
+      SELECT 1 FROM public.squads s
+      WHERE s.id = squad_chat_messages.squad_id AND s.creator_id = auth.uid()
+    )
+    OR EXISTS (
+      SELECT 1 FROM public.squad_members sm
+      WHERE sm.squad_id = squad_chat_messages.squad_id AND sm.user_id = auth.uid()
+    ))
+  )
+  WITH CHECK (
+    sender_id <> auth.uid()
+    AND read_at IS NOT NULL
+    AND (EXISTS (
+      SELECT 1 FROM public.squads s
+      WHERE s.id = squad_chat_messages.squad_id AND s.creator_id = auth.uid()
+    )
+    OR EXISTS (
+      SELECT 1 FROM public.squad_members sm
+      WHERE sm.squad_id = squad_chat_messages.squad_id AND sm.user_id = auth.uid()
+    ))
+  );
+
+CREATE OR REPLACE FUNCTION public.prevent_squad_message_edits()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.id IS DISTINCT FROM OLD.id
+    OR NEW.squad_id IS DISTINCT FROM OLD.squad_id
+    OR NEW.sender_id IS DISTINCT FROM OLD.sender_id
+    OR NEW.text IS DISTINCT FROM OLD.text
+    OR NEW.created_at IS DISTINCT FROM OLD.created_at
+    OR OLD.read_at IS NOT NULL
+    OR NEW.read_at IS NULL
+  THEN
+    RAISE EXCEPTION 'Squad messages may only be marked as read once';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS prevent_squad_message_edits ON public.squad_chat_messages;
+CREATE TRIGGER prevent_squad_message_edits
+BEFORE UPDATE ON public.squad_chat_messages
+FOR EACH ROW EXECUTE FUNCTION public.prevent_squad_message_edits();
+
+DROP POLICY IF EXISTS "Public can view message reactions" ON public.message_reactions;
+DROP POLICY IF EXISTS "Squad members can view message reactions" ON public.message_reactions;
+CREATE POLICY "Squad members can view message reactions"
+  ON public.message_reactions FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.squad_chat_messages message
+      JOIN public.squads squad ON squad.id = message.squad_id
+      WHERE message.id = message_reactions.message_id
+        AND (
+          squad.creator_id = auth.uid()
+          OR EXISTS (
+            SELECT 1 FROM public.squad_members member
+            WHERE member.squad_id = message.squad_id AND member.user_id = auth.uid()
+          )
+        )
+    )
+  );
+DROP POLICY IF EXISTS "Users can add own message reactions" ON public.message_reactions;
+DROP POLICY IF EXISTS "Squad members can add own message reactions" ON public.message_reactions;
+CREATE POLICY "Squad members can add own message reactions"
+  ON public.message_reactions FOR INSERT TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1
+      FROM public.squad_chat_messages message
+      JOIN public.squads squad ON squad.id = message.squad_id
+      WHERE message.id = message_reactions.message_id
+        AND (
+          squad.creator_id = auth.uid()
+          OR EXISTS (
+            SELECT 1 FROM public.squad_members member
+            WHERE member.squad_id = message.squad_id AND member.user_id = auth.uid()
+          )
+        )
+    )
+  );
+DROP POLICY IF EXISTS "Users can remove own message reactions" ON public.message_reactions;
+DROP POLICY IF EXISTS "Squad members can remove own message reactions" ON public.message_reactions;
+CREATE POLICY "Squad members can remove own message reactions"
+  ON public.message_reactions FOR DELETE TO authenticated
+  USING (
+    auth.uid() = user_id
+    AND EXISTS (
+      SELECT 1
+      FROM public.squad_chat_messages message
+      JOIN public.squads squad ON squad.id = message.squad_id
+      WHERE message.id = message_reactions.message_id
+        AND (
+          squad.creator_id = auth.uid()
+          OR EXISTS (
+            SELECT 1 FROM public.squad_members member
+            WHERE member.squad_id = message.squad_id AND member.user_id = auth.uid()
+          )
+        )
+    )
   );

@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Trophy, Flame, BookOpen, Code, Camera, Plus, Users, Target } from 'lucide-react';
 import { Challenge } from '../../types';
 import { StorageService } from '../../services/storageService';
+import { addKnownHashtag, loadKnownHashtags } from '../../services/hashtagService';
 
 interface CreateChallengeModalProps {
   onClose: () => void;
@@ -28,22 +29,37 @@ export const CreateChallengeModal: React.FC<CreateChallengeModalProps> = ({
   const [icon, setIcon] = useState('book');
   const [customHashtag, setCustomHashtag] = useState('');
   const [isAddingHashtag, setIsAddingHashtag] = useState(false);
-  const [customTags, setCustomTags] = useState<string[]>(() => StorageService.getCustomHashtags());
+  const [tagFeedback, setTagFeedback] = useState<string | null>(null);
+  const [allTagOptions, setAllTagOptions] = useState<string[]>(() => StorageService.getAllKnownHashtags());
 
-  const defaultTagOptions = ['#Reading', '#Coding', '#Fitness', '#Habits', '#Building', '#Creativity'];
-  const allTagOptions = Array.from(new Set([...defaultTagOptions, ...customTags]));
+  useEffect(() => {
+    loadKnownHashtags().then(setAllTagOptions).catch((error: unknown) => {
+      console.error('Hashtag list could not be loaded:', error);
+      setTagFeedback('Shared hashtags could not be loaded. Please try again later.');
+    });
+  }, []);
 
-  const handleAddCustomTag = (e: React.FormEvent) => {
+  const handleAddCustomTag = async (e: React.SyntheticEvent) => {
     e.preventDefault();
     if (!customHashtag.trim()) return;
-    const formatted = customHashtag.trim().startsWith('#')
-      ? customHashtag.trim()
-      : `#${customHashtag.trim()}`;
-    const updated = StorageService.addCustomHashtag(formatted);
-    setCustomTags(updated);
-    setSelectedTag(formatted);
-    setCustomHashtag('');
-    setIsAddingHashtag(false);
+    try {
+      const result = await addKnownHashtag(customHashtag.trim());
+      setAllTagOptions(await loadKnownHashtags());
+      setSelectedTag(result.canonicalTag);
+      setCustomHashtag('');
+      setIsAddingHashtag(false);
+      setTagFeedback(
+        result.isNew
+          ? result.shared
+            ? `Created shared hashtag "${result.canonicalTag}"!`
+            : `Created local hashtag "${result.canonicalTag}". Sign in to share it.`
+          : `"${result.canonicalTag}" already exists and was selected.`
+      );
+    } catch (error) {
+      console.error('Hashtag creation failed:', error);
+      setTagFeedback('Hashtag could not be created. Please try again.');
+    }
+    setTimeout(() => setTagFeedback(null), 3000);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -228,6 +244,11 @@ export const CreateChallengeModal: React.FC<CreateChallengeModalProps> = ({
             <label className="block text-[11px] font-semibold text-[#9298A3] uppercase tracking-wider mb-1.5">
               Tag / Discipline
             </label>
+            {tagFeedback && (
+              <div className="mb-2 text-[10px] text-[#3B82FF] bg-[#2166FF]/10 px-2 py-1 rounded-lg border border-[#2166FF]/20">
+                {tagFeedback}
+              </div>
+            )}
             <div className="flex flex-wrap gap-1.5 items-center">
               {allTagOptions.map((tag) => (
                 <button

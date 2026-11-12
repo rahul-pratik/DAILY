@@ -30,6 +30,7 @@ interface CreatePostScreenProps {
     isDailyProof?: boolean;
     communityId?: string;
     communityName?: string;
+    challengeId?: string;
     challengeTitle?: string;
   }) => void;
 }
@@ -151,6 +152,7 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
       audience,
       communityId: selectedDestination.type === 'community' ? selectedDestination.id : undefined,
       communityName: selectedDestination.type === 'community' ? selectedDestination.name : undefined,
+      challengeId: selectedDestination.type === 'challenge' ? selectedDestination.id : undefined,
       challengeTitle: selectedDestination.type === 'challenge' ? selectedDestination.name : undefined,
     });
   };

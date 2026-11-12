@@ -6,6 +6,7 @@ export type ScreenType =
   | 'profile' 
   | 'accountability_hub' 
   | 'cohort_discussions' 
+  | 'squad_chats'
   | 'community_hub' 
   | 'challenge_detail' 
   | 'my_joined_communities';
@@ -50,6 +51,7 @@ export interface CommunityPost {
   userVote?: 'credit' | 'discredit' | 'up' | 'down' | null;
   timestamp: string;
   commentsCount: number;
+  feedVisible?: boolean;
   isPinned?: boolean;
   isDailyProof?: boolean;
   photoUrl?: string;
@@ -68,6 +70,12 @@ export interface CohortProof {
   verified?: boolean;
 }
 
+export interface MessageReaction {
+  emoji: string;
+  count: number;
+  users: string[]; // usernames or user IDs of reactors
+}
+
 export interface SquadChatMessage {
   id: string;
   squadId: string;
@@ -80,6 +88,9 @@ export interface SquadChatMessage {
   };
   text: string;
   timestamp: string;
+  read_at?: string | null;
+  readBy?: string[];
+  reactions?: MessageReaction[];
 }
 
 export interface Author {
@@ -116,12 +127,14 @@ export interface Post {
   likesCount: number;
   creditsCount?: number;
   commentsCount: number;
+  feedVisible?: boolean;
   isLiked?: boolean;
   userVote?: 'credit' | 'discredit' | null;
   isSaved?: boolean;
   comments?: Comment[];
   communityId?: string;
   communityName?: string;
+  challengeId?: string;
   sharedPost?: Post;
   mentionedAuthor?: Author;
   isDailyProof?: boolean;

@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Users, Globe, Lock, Plus, Sparkles, Tag } from 'lucide-react';
 import { Community } from '../../types';
+import { StorageService } from '../../services/storageService';
+import { addKnownHashtag, loadKnownHashtags } from '../../services/hashtagService';
 
 interface CreateCommunityModalProps {
   onClose: () => void;
@@ -20,8 +22,43 @@ export const CreateCommunityModal: React.FC<CreateCommunityModalProps> = ({
   const [category, setCategory] = useState('Coding');
   const [isPublic, setIsPublic] = useState(true);
   const [selectedTag, setSelectedTag] = useState('#Coding');
+  const [customTagInput, setCustomTagInput] = useState('');
+  const [isAddingTag, setIsAddingTag] = useState(false);
+  const [tagFeedback, setTagFeedback] = useState<string | null>(null);
+  const [availableTags, setAvailableTags] = useState<string[]>(() => StorageService.getAllKnownHashtags());
 
-  const topicOptions = ['#Coding', '#AI & Tech', '#Startups', '#Fitness', '#Design', '#Writing'];
+  useEffect(() => {
+    loadKnownHashtags().then(setAvailableTags).catch((error: unknown) => {
+      console.error('Hashtag list could not be loaded:', error);
+      setTagFeedback('Shared hashtags could not be loaded. Please try again later.');
+    });
+  }, []);
+
+  const handleCreateCustomTag = async (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    const clean = customTagInput.trim();
+    if (!clean) return;
+
+    try {
+      const result = await addKnownHashtag(clean);
+      setSelectedTag(result.canonicalTag);
+      setCategory(result.canonicalTag.replace('#', ''));
+      setAvailableTags(await loadKnownHashtags());
+      setCustomTagInput('');
+      setIsAddingTag(false);
+      setTagFeedback(
+        result.isNew
+          ? result.shared
+            ? `Created shared hashtag "${result.canonicalTag}"!`
+            : `Created local hashtag "${result.canonicalTag}". Sign in to share it.`
+          : `"${result.canonicalTag}" already exists and was selected.`
+      );
+    } catch (error) {
+      console.error('Hashtag creation failed:', error);
+      setTagFeedback('Hashtag could not be created. Please try again.');
+    }
+    setTimeout(() => setTagFeedback(null), 3000);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,13 +144,62 @@ export const CreateCommunityModal: React.FC<CreateCommunityModalProps> = ({
               />
             </div>
 
-            {/* Filter by Topic / Habit */}
+            {/* Topic / Discipline with Custom Hashtags */}
             <div>
-              <label className="block text-[10px] sm:text-[11px] font-semibold text-[#9298A3] uppercase tracking-wider mb-1.5">
-                Topic / Discipline
-              </label>
-              <div className="flex flex-wrap gap-1.5">
-                {topicOptions.map((topic) => (
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-[10px] sm:text-[11px] font-semibold text-[#9298A3] uppercase tracking-wider">
+                  Topic / Discipline
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setIsAddingTag(!isAddingTag)}
+                  className="text-[10px] font-semibold text-[#3B82FF] hover:text-[#2166FF] flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <Plus size={12} />
+                  <span>{isAddingTag ? 'Cancel' : 'New Hashtag'}</span>
+                </button>
+              </div>
+
+              {/* Tag creation input bar */}
+              {isAddingTag && (
+                <div className="mb-2 p-2 bg-[#10141D] border border-[#2166FF]/40 rounded-xl space-y-1.5 animate-fade-in">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={customTagInput}
+                      onChange={(e) => setCustomTagInput(e.target.value)}
+                      placeholder="e.g. #Web3, #Cybersecurity"
+                      className="flex-1 bg-[#080B10] border border-[#202738] rounded-lg px-2.5 py-1 text-xs text-white placeholder-[#8A92A6] focus:outline-none focus:border-[#2166FF]"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleCreateCustomTag(e);
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCreateCustomTag}
+                      disabled={!customTagInput.trim()}
+                      className="px-2.5 py-1 rounded-lg bg-[#2166FF] hover:bg-[#3B82FF] disabled:opacity-40 text-white text-xs font-semibold cursor-pointer shrink-0"
+                    >
+                      Add
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-[#8A92A6]">
+                    Hashtags are shared platform-wide. Existing hashtags will not be duplicated.
+                  </p>
+                </div>
+              )}
+
+              {tagFeedback && (
+                <div className="mb-2 text-[10px] text-[#3B82FF] bg-[#2166FF]/10 px-2 py-1 rounded-lg border border-[#2166FF]/20">
+                  {tagFeedback}
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-0.5 no-scrollbar">
+                {availableTags.map((topic) => (
                   <button
                     type="button"
                     key={topic}
@@ -122,7 +208,7 @@ export const CreateCommunityModal: React.FC<CreateCommunityModalProps> = ({
                       setCategory(topic.replace('#', ''));
                     }}
                     className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all cursor-pointer ${
-                      selectedTag === topic
+                      selectedTag.toLowerCase() === topic.toLowerCase()
                         ? 'bg-[#2166FF] text-white shadow-sm'
                         : 'bg-[#101010] text-[#9298A3] hover:text-white border border-[#20242C]'
                     }`}

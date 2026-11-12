@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   ArrowLeft, 
   Search, 
@@ -20,7 +20,10 @@ import {
   UserCheck,
   UserPlus,
   CheckSquare,
-  Square
+  Square,
+  Image as ImageIcon,
+  Camera,
+  Maximize2
 } from 'lucide-react';
 import { Author, Community, CommunityPost, Post } from '../../types';
 import { CommunityModeratorModal } from '../modals/CommunityModeratorModal';
@@ -41,9 +44,10 @@ interface CommunityHubScreenProps {
   communityPosts?: CommunityPost[];
   onCreateDiscussion?: (post: Partial<CommunityPost> & { isDailyProof?: boolean }) => void;
   onVoteDiscussion?: (postId: string, direction: 'up' | 'down') => void;
-  onOpenComments?: (post: Post) => void;
+  onOpenComments?: (post: Post, isModerator?: boolean) => void;
   onOpenShare?: (post: Post) => void;
   onPostAsDailyProof?: (content: string, photoUrl?: string, communityName?: string) => void;
+  onDeletePost?: (postId: string) => void;
   allPosts?: Post[];
 }
 
@@ -63,6 +67,7 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
   onVoteDiscussion,
   onOpenComments,
   onPostAsDailyProof,
+  onDeletePost,
   allPosts,
 }) => {
   const [activeCategory, setActiveCategory] = useState<'All' | 'Discussion' | 'Question' | 'Advice' | 'Story' | 'Milestone'>('All');
@@ -76,16 +81,36 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
   const [newPostText, setNewPostText] = useState('');
   const [isGuidelinesOpen, setIsGuidelinesOpen] = useState(false);
   const [isMuted, setIsMuted] = useState<boolean>(() => StorageService.isCommunityMuted(community.id));
+  const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
+  const [activeLightboxImage, setActiveLightboxImage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   
   // Moderator Modal State
   const [isModModalOpen, setIsModModalOpen] = useState(false);
   const [modModalTab, setModModalTab] = useState<'invites' | 'guidelines'>('invites');
 
   // Check if current user is moderator or founder
-  const isModerator = 
-    community.creator?.username === currentUser.username ||
-    community.moderators?.some((m) => m.username === currentUser.username) ||
-    currentUser.username === 'aarav.codes';
+  const isModerator = Boolean(
+    (community.creator?.username && currentUser?.username && community.creator.username.toLowerCase() === currentUser.username.toLowerCase()) ||
+    ((community.creator as any)?.id && (community.creator as any)?.id === currentUser?.id) ||
+    community.moderators?.some((m) => m.username?.toLowerCase() === currentUser?.username?.toLowerCase()) ||
+    currentUser.username === 'aarav.codes' ||
+    currentUser.username === 'builder'
+  );
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === 'string') {
+        setSelectedPhoto(reader.result);
+        setIsComposerExpanded(true);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   const pendingRequestsCount = community.pendingJoinRequests?.length || 0;
 
@@ -175,6 +200,7 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
       communityId: community.id,
       communityName: community.name,
       author: {
+        id: currentUser.id,
         name: currentUser.name,
         username: currentUser.username,
         avatar: currentUser.avatar,
@@ -187,12 +213,14 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
       userVote: 'up',
       timestamp: 'Just now',
       commentsCount: 0,
+      photoUrl: selectedPhoto || undefined,
     };
 
     setLocalPosts(prev => [newPost, ...prev]);
     onCreateDiscussion?.({ ...newPost, isDailyProof: addAsDailyProof });
     setNewPostText('');
     setNewPostTitle('');
+    setSelectedPhoto(null);
     setAddAsDailyProof(false);
     setIsComposerExpanded(false);
   };
@@ -475,6 +503,70 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
           ))}
         </div>
 
+        {/* Photo Upload Controls (Gallery / Camera) */}
+        <div className="flex items-center justify-between pt-1 border-t border-[#20242C]/40">
+          <div className="flex items-center gap-2">
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept="image/*"
+              className="hidden"
+              onChange={handleImageSelect}
+            />
+            <input
+              type="file"
+              ref={cameraInputRef}
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={handleImageSelect}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#121620] hover:bg-[#1a1f29] border border-[#202738] text-[11px] font-medium text-[#8A92A6] hover:text-white transition-colors cursor-pointer"
+              title="Upload photo from gallery"
+            >
+              <ImageIcon size={13} className="text-[#3B82FF]" />
+              <span>Gallery</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => cameraInputRef.current?.click()}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#121620] hover:bg-[#1a1f29] border border-[#202738] text-[11px] font-medium text-[#8A92A6] hover:text-white transition-colors cursor-pointer"
+              title="Capture photo with camera"
+            >
+              <Camera size={13} className="text-emerald-400" />
+              <span>Camera</span>
+            </button>
+          </div>
+          {selectedPhoto && (
+            <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-1">
+              <Check size={11} />
+              Photo attached
+            </span>
+          )}
+        </div>
+
+        {/* Selected Photo Thumbnail Preview */}
+        {selectedPhoto && (
+          <div className="relative rounded-xl overflow-hidden border border-[#20242C] aspect-video max-h-48 bg-[#080B10]">
+            <img
+              src={selectedPhoto}
+              alt="Community post upload preview"
+              className="w-full h-full object-cover"
+            />
+            <button
+              type="button"
+              onClick={() => setSelectedPhoto(null)}
+              className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/80 hover:bg-red-500 text-white flex items-center justify-center transition-colors cursor-pointer shadow-md"
+              title="Remove photo"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         {/* Feature 3: Option "Add as daily proof" */}
         {isComposerExpanded && (
           <div
@@ -631,17 +723,20 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
                     </div>
                   </div>
 
-                  {/* Delete button: ONLY visible if current user is author or community moderator */}
+                  {/* Delete button: visible if current user is author OR community moderator */}
                   {Boolean(
+                    isModerator ||
                     (post.author.username && currentUser.username && post.author.username.toLowerCase() === currentUser.username.toLowerCase()) ||
-                    (post.author.id && currentUser.id && post.author.id === currentUser.id) ||
-                    (community.creator && currentUser.username && community.creator.username.toLowerCase() === currentUser.username.toLowerCase())
+                    (post.author.id && currentUser.id && post.author.id === currentUser.id)
                   ) && (
                     <button
-                      onClick={() => setLocalPosts(prev => prev.filter(p => p.id !== post.id))}
+                      onClick={() => {
+                        setLocalPosts(prev => prev.filter(p => p.id !== post.id));
+                        onDeletePost?.(post.id);
+                      }}
                       className="text-[#9298A3] hover:text-red-400 p-1 cursor-pointer transition-colors"
                       aria-label="Delete post"
-                      title="Remove discussion post"
+                      title={isModerator && post.author.username !== currentUser.username ? "Moderator: Delete post from community" : "Delete your post"}
                     >
                       <Trash2 size={14} />
                     </button>
@@ -658,6 +753,25 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
                   {post.content}
                 </p>
 
+                {/* Post Photo Attachment */}
+                {post.photoUrl && (
+                  <div
+                    onClick={() => setActiveLightboxImage(post.photoUrl!)}
+                    className="rounded-2xl overflow-hidden border border-[#20242C] mb-3 group cursor-pointer aspect-video max-h-72 bg-[#080B10] relative"
+                  >
+                    <img
+                      src={post.photoUrl}
+                      alt={post.title}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="absolute bottom-2 right-2 px-2 py-1 rounded-lg bg-black/75 text-[10px] text-white flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Maximize2 size={11} />
+                      <span>View Full Photo</span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Bottom Action Buttons */}
                 <div className="flex items-center gap-2 pt-1 border-t border-[#20242C]/40 text-xs text-[#9298A3]">
                   <button
@@ -667,7 +781,7 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
                         onOpenComments({
                           id: post.id,
                           author: {
-                            id: post.author.username,
+                            id: post.author.id || post.author.username,
                             name: post.author.name,
                             username: post.author.username,
                             avatar: post.author.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
@@ -677,10 +791,13 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
                           content: `${post.title ? post.title + '\n\n' : ''}${post.content}`,
                           likesCount: post.upvotes || 0,
                           commentsCount: Math.max(post.commentsCount || 0, matchPost?.commentsCount || 0),
-                          comments: matchPost?.comments || [],
+                          comments: matchPost?.comments || StorageService.getCommentsForPost(post.id),
                           communityId: community.id,
                           communityName: community.name,
-                        });
+                          feedVisible: post.feedVisible,
+                          imageUrl: post.photoUrl,
+                          mediaUrls: post.photoUrl ? [post.photoUrl] : undefined,
+                        }, isModerator);
                       }
                     }}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#101010] hover:bg-[#1a1f29] border border-[#20242C] hover:text-white transition-colors cursor-pointer"
@@ -764,6 +881,33 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
           onApproveRequest={(cId, rId, u) => onApproveJoinRequest?.(cId, rId, u)}
           onDeclineRequest={(cId, rId) => onDeclineJoinRequest?.(cId, rId)}
         />
+      )}
+      {/* Image Lightbox Modal */}
+      {activeLightboxImage && (
+        <div
+          onClick={() => setActiveLightboxImage(null)}
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative max-w-4xl max-h-[90vh] flex flex-col items-center"
+          >
+            <button
+              type="button"
+              onClick={() => setActiveLightboxImage(null)}
+              className="absolute -top-10 right-0 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
+              aria-label="Close photo"
+            >
+              <X size={18} />
+            </button>
+            <img
+              src={activeLightboxImage}
+              alt="Full size community post photo"
+              className="max-w-full max-h-[85vh] rounded-2xl object-contain border border-[#20242C] shadow-2xl"
+              referrerPolicy="no-referrer"
+            />
+          </div>
+        </div>
       )}
     </div>
   );

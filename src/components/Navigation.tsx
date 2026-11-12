@@ -14,7 +14,8 @@ export const Navigation: React.FC<NavigationProps> = ({
   const isChallengesActive = 
     currentScreen === 'challenges' || 
     currentScreen === 'challenge_detail' || 
-    currentScreen === 'cohort_discussions';
+    currentScreen === 'cohort_discussions' ||
+    currentScreen === 'squad_chats';
 
   const isCommunitiesActive = 
     currentScreen === 'communities' || 

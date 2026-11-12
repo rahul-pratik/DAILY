@@ -15,6 +15,8 @@ interface SearchModalProps {
   onSelectCommunity: (community: Community) => void;
   onSelectChallenge: (challenge: Challenge) => void;
   onNavigateAuthorProfile?: (author: Author) => void;
+  initialQuery?: string;
+  onQueryChange?: (query: string) => void;
 }
 
 export const SearchModal: React.FC<SearchModalProps> = ({
@@ -27,8 +29,14 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   onSelectCommunity,
   onSelectChallenge,
   onNavigateAuthorProfile,
+  initialQuery = '',
+  onQueryChange,
 }) => {
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery);
+  const updateQuery = (value: string) => {
+    setQuery(value);
+    onQueryChange?.(value);
+  };
   const [supabaseCreators, setSupabaseCreators] = useState<Author[]>([]);
   const [isSearchingProfiles, setIsSearchingProfiles] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>(() => {
@@ -207,7 +215,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
           <input
             type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => updateQuery(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && query.trim()) {
                 saveRecentSearch(query);
@@ -219,7 +227,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
           />
           {query && (
             <button
-              onClick={() => setQuery('')}
+              onClick={() => updateQuery('')}
               className="text-[#9298A3] hover:text-white p-1"
             >
               <X size={16} />
@@ -256,7 +264,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                   {recentSearches.map((item) => (
                     <div
                       key={item}
-                      onClick={() => setQuery(item)}
+                      onClick={() => updateQuery(item)}
                       className="group flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs bg-[#10141E] hover:bg-[#1A2234] border border-[#202738] hover:border-[#2166FF]/50 text-white/90 transition-all cursor-pointer"
                     >
                       <Clock size={11} className="text-[#8A92A6] group-hover:text-[#3B82FF]" />

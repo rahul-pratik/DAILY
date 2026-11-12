@@ -17,7 +17,8 @@ import {
   X, 
   Maximize2,
   Bell,
-  BellOff
+  BellOff,
+  Trash2
 } from 'lucide-react';
 import { Author, Challenge, CohortProof } from '../../types';
 import { getSafeUUID } from '../../lib/supabase';
@@ -35,6 +36,7 @@ interface CohortDiscussionsScreenProps {
   onToggleFollow?: (userId: string) => void;
   onAddProof?: (challengeId: string, proof: CohortProof) => void;
   onVerifyProof?: (challengeId: string, proofId: string) => Promise<boolean>;
+  onDeleteProof?: (challengeId: string, proofId: string) => Promise<boolean>;
 }
 
 const DEFAULT_COHORT_PROOFS: Record<string, CohortProof[]> = {
@@ -52,6 +54,7 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
   onToggleFollow,
   onAddProof,
   onVerifyProof,
+  onDeleteProof,
 }) => {
   const [selectedCohort, setSelectedCohort] = useState<Challenge>(challenge);
   const [viewMode, setViewMode] = useState<'list' | 'detail'>(initialViewMode);
@@ -532,9 +535,31 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
                 </div>
               </div>
 
-              <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-[#2166FF]/15 text-[#3B82FF] border border-[#2166FF]/30 whitespace-nowrap shrink-0">
-                Day {proof.dayNumber} Proof
-              </span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-[#2166FF]/15 text-[#3B82FF] border border-[#2166FF]/30 whitespace-nowrap">
+                  Day {proof.dayNumber} Proof
+                </span>
+                {Boolean(
+                  isModerator ||
+                  (proof.author.username && currentUser?.username && proof.author.username.toLowerCase() === currentUser.username.toLowerCase()) ||
+                  (proof.author.id && currentUser?.id && proof.author.id === currentUser.id)
+                ) && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const deleted = onDeleteProof
+                        ? await onDeleteProof(selectedCohort.id, proof.id)
+                        : true;
+                      if (deleted) setProofs(prev => prev.filter(p => p.id !== proof.id));
+                    }}
+                    className="text-[#9298A3] hover:text-red-400 p-1 cursor-pointer transition-colors"
+                    title={isModerator && proof.author.username !== currentUser.username ? "Moderator: Delete proof from challenge" : "Delete your proof"}
+                    aria-label="Delete proof"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Proof Note */}

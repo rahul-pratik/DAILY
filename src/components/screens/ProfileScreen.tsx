@@ -55,6 +55,8 @@ interface ProfileScreenProps {
   onOpenShare?: (post: Post) => void;
   onToggleSave?: (postId: string) => void;
   onDeletePost?: (postId: string) => void;
+  canDeletePost?: (post: Post) => boolean;
+  onToggleLike?: (postId: string) => void;
 }
 
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({
@@ -78,6 +80,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   onOpenShare,
   onToggleSave,
   onDeletePost,
+  canDeletePost,
+  onToggleLike,
 }) => {
   // Tabs: strictly ONLY posts | saved | following per user requirement
   const [activeTab, setActiveTab] = useState<'posts' | 'saved' | 'following'>('posts');
@@ -592,10 +596,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
                     {/* Delete button: in top right corner of that post */}
                     {Boolean(
-                      currentUser && (
+                      canDeletePost?.(post) ||
+                      (currentUser && (
                         (post.author.id && currentUser.id && post.author.id === currentUser.id) ||
                         (post.author.username && currentUser.username && post.author.username.toLowerCase() === currentUser.username.toLowerCase())
-                      )
+                      ))
                     ) && onDeletePost && (
                       <button
                         type="button"
@@ -630,10 +635,27 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
                 <div className="flex items-center justify-between text-xs text-[#9298A3] font-mono pt-2 border-t border-[#20242C]/50">
                   <div className="flex items-center gap-4">
-                    <span className="flex items-center gap-1.5 text-[#3B82FF] transition-colors" title="Credits">
-                      <CreditIcon size={14} credited={post.isLiked || post.userVote === 'credit'} className={(post.isLiked || post.userVote === 'credit') ? 'text-[#2166FF]' : 'text-[#9298A3]'} />
-                      <span className="font-semibold">{post.creditsCount ?? post.likesCount} credits</span>
-                    </span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleLike?.(post.id);
+                      }}
+                      className={`flex items-center gap-1.5 transition-colors cursor-pointer group px-2 py-0.5 -ml-2 rounded-full ${
+                        (post.isLiked || post.userVote === 'credit')
+                          ? 'text-[#2166FF] font-bold bg-[#2166FF]/10'
+                          : 'text-[#9298A3] hover:text-[#3B82FF] hover:bg-[#121620]'
+                      }`}
+                      aria-label={(post.isLiked || post.userVote === 'credit') ? 'Remove credit' : 'Give credit (C)'}
+                      title={(post.isLiked || post.userVote === 'credit') ? 'Credited' : 'Give credit (C)'}
+                    >
+                      <CreditIcon
+                        size={14}
+                        credited={post.isLiked || post.userVote === 'credit'}
+                        className={(post.isLiked || post.userVote === 'credit') ? 'text-[#2166FF]' : 'text-[#9298A3] group-hover:text-[#3B82FF]'}
+                      />
+                      <span className="font-semibold tabular-nums">{post.creditsCount ?? post.likesCount} credits</span>
+                    </button>
                     <span className="flex items-center gap-1.5 hover:text-white transition-colors">
                       <MessageSquare size={14} />
                       <span>{post.commentsCount}</span>
@@ -708,10 +730,27 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
                 <div className="flex items-center justify-between text-xs text-[#9298A3] font-mono pt-2 border-t border-[#20242C]/50">
                   <div className="flex items-center gap-4">
-                    <span className="flex items-center gap-1.5 text-[#3B82FF] transition-colors" title="Credits">
-                      <CreditIcon size={14} credited={post.isLiked || post.userVote === 'credit'} className={(post.isLiked || post.userVote === 'credit') ? 'text-[#2166FF]' : 'text-[#9298A3]'} />
-                      <span className="font-semibold">{post.creditsCount ?? post.likesCount} credits</span>
-                    </span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleLike?.(post.id);
+                      }}
+                      className={`flex items-center gap-1.5 transition-colors cursor-pointer group px-2 py-0.5 -ml-2 rounded-full ${
+                        (post.isLiked || post.userVote === 'credit')
+                          ? 'text-[#2166FF] font-bold bg-[#2166FF]/10'
+                          : 'text-[#9298A3] hover:text-[#3B82FF] hover:bg-[#121620]'
+                      }`}
+                      aria-label={(post.isLiked || post.userVote === 'credit') ? 'Remove credit' : 'Give credit (C)'}
+                      title={(post.isLiked || post.userVote === 'credit') ? 'Credited' : 'Give credit (C)'}
+                    >
+                      <CreditIcon
+                        size={14}
+                        credited={post.isLiked || post.userVote === 'credit'}
+                        className={(post.isLiked || post.userVote === 'credit') ? 'text-[#2166FF]' : 'text-[#9298A3] group-hover:text-[#3B82FF]'}
+                      />
+                      <span className="font-semibold tabular-nums">{post.creditsCount ?? post.likesCount} credits</span>
+                    </button>
                     <span className="flex items-center gap-1.5 hover:text-white transition-colors">
                       <MessageSquare size={14} />
                       <span>{post.commentsCount}</span>

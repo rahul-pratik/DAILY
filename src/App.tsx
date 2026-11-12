@@ -17,6 +17,7 @@ import { CohortDiscussionsScreen } from './components/screens/CohortDiscussionsS
 import { CommunityHubScreen } from './components/screens/CommunityHubScreen';
 import { ChallengeDetailScreen } from './components/screens/ChallengeDetailScreen';
 import { JoinedCommunitiesScreen } from './components/screens/JoinedCommunitiesScreen';
+import { SquadChatsScreen } from './components/screens/SquadChatsScreen';
 
 import { CommentsModal } from './components/modals/CommentsModal';
 import { ChallengeDetailModal } from './components/modals/ChallengeDetailModal';
@@ -51,6 +52,12 @@ export default function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenType>('home');
   const [previousScreen, setPreviousScreen] = useState<ScreenType>('home');
   const [cohortViewMode, setCohortViewMode] = useState<'list' | 'detail'>('list');
+  const [squadChatViewMode, setSquadChatViewMode] = useState<'list' | 'detail'>('list');
+  const [activeSquadForChat, setActiveSquadForChat] = useState<Squad | null>(null);
+  const [navigatedFromSearch, setNavigatedFromSearch] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [userBeforeSearchNavigation, setUserBeforeSearchNavigation] = useState<Author | null>(null);
+  const [isCurrentPostModerator, setIsCurrentPostModerator] = useState<boolean>(false);
   const [isOnboardingDone, setIsOnboardingDone] = useState<boolean>(StorageService.isOnboardingCompleted());
 
   // Application Data States (persisted via StorageService or fetched from Supabase)
@@ -188,6 +195,7 @@ export default function App() {
         squadsRes,
         squadMembersRes,
         squadChatRes,
+        messageReactionsRes,
         userLikesRes,
         userPostCreditsRes,
         userBookmarksRes,
@@ -208,6 +216,7 @@ export default function App() {
         supabase.from('squads').select('*').order('created_at', { ascending: false }),
         supabase.from('squad_members').select('*'),
         supabase.from('squad_chat_messages').select('*').order('created_at', { ascending: true }).limit(200),
+        supabase.from('message_reactions').select('message_id, user_id, emoji'),
         activeAuthId ? supabase.from('post_likes').select('post_id').eq('user_id', activeAuthId) : Promise.resolve({ data: [] }),
         activeAuthId ? supabase.from('post_credits').select('post_id, vote_type').eq('user_id', activeAuthId) : Promise.resolve({ data: [] }),
         activeAuthId ? supabase.from('post_bookmarks').select('post_id').eq('user_id', activeAuthId) : Promise.resolve({ data: [] }),
@@ -229,8 +238,20 @@ export default function App() {
       const remoteFollows = ((userFollowsRes?.data as any[]) || []).map((f: any) => f.following_id);
       const localFollows = StorageService.getUserFollows(effectiveFollowerId);
       const myFollows = new Set([...remoteFollows, ...localFollows]);
+      const reactionsByMessage = new Map<string, Map<string, { emoji: string; userIds: Set<string>; users: string[] }>>();
+      ((messageReactionsRes.data as any[]) || []).forEach((row: any) => {
+        const byEmoji = reactionsByMessage.get(row.message_id) || new Map();
+        const reaction = byEmoji.get(row.emoji) || { emoji: row.emoji, userIds: new Set<string>(), users: [] };
+        const profile = profileMap.get(row.user_id);
+        reaction.userIds.add(row.user_id);
+        reaction.users.push(profile?.username || row.user_id);
+        byEmoji.set(row.emoji, reaction);
+        reactionsByMessage.set(row.message_id, byEmoji);
+      });
+
       const mappedSquadChat: SquadChatMessage[] = ((squadChatRes.data as any[]) || []).map((row: any) => {
         const senderProfile = profileMap.get(row.sender_id);
+        const messageReactions = Array.from(reactionsByMessage.get(row.id)?.values() || []);
         return {
           id: row.id,
           squadId: row.squad_id,
@@ -242,6 +263,12 @@ export default function App() {
           },
           text: row.text,
           timestamp: new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          read_at: row.read_at || null,
+          reactions: messageReactions.map((reaction) => ({
+            emoji: reaction.emoji,
+            count: reaction.userIds.size,
+            users: reaction.users,
+          })),
         };
       });
       setSquadChatMessages(mappedSquadChat);
@@ -448,6 +475,8 @@ export default function App() {
             mediaUrls: p.media_urls || [],
             mediaUrl: p.media_urls?.[0],
             mediaType: p.media_type === 'none' ? undefined : p.media_type,
+            challengeId: p.challenge_id || undefined,
+            feedVisible: p.feed_visible !== false,
           };
         });
 
@@ -470,7 +499,13 @@ export default function App() {
               commentsCount: Math.max(p.commentsCount, merged.length),
             };
           });
-        finalMergedPosts = [...mappedRemotePosts, ...nonSyncedLocal];
+        const hiddenFeedPostIds = new Set(
+          dbPosts.filter((row: any) => row.feed_visible === false).map((row: any) => row.id)
+        );
+        finalMergedPosts = [
+          ...mappedRemotePosts.filter((post) => !hiddenFeedPostIds.has(post.id)),
+          ...nonSyncedLocal,
+        ];
 
         setPosts(finalMergedPosts);
         StorageService.savePosts(finalMergedPosts);
@@ -497,6 +532,7 @@ export default function App() {
               id: p.id,
               communityId: p.community_id,
               author: {
+                id: p.author_id,
                 name: authorProfile?.name || 'Builder',
                 username: authorProfile?.username || 'builder',
                 avatar: authorProfile?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
@@ -518,6 +554,8 @@ export default function App() {
                   : null,
               timestamp: new Date(p.created_at).toLocaleDateString(),
               commentsCount: p.comments_count || 0,
+              photoUrl: p.media_urls?.[0] || undefined,
+              feedVisible: p.feed_visible !== false,
             };
           });
 
@@ -1093,6 +1131,12 @@ export default function App() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'squad_chat_messages' }, () => {
         fetchSupabaseData(undefined, true);
       })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'squad_chat_messages' }, () => {
+        fetchSupabaseData(undefined, true);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, () => {
+        fetchSupabaseData(undefined, true);
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'post_comments' }, () => {
         fetchSupabaseData(undefined, true);
       })
@@ -1268,7 +1312,12 @@ export default function App() {
   };
 
   // Navigate to any user's profile
-  const handleNavigateToUser = (target: { name: string; username: string; avatar?: string; id?: string }) => {
+  const handleNavigateToUser = (
+    target: { name: string; username: string; avatar?: string; id?: string },
+    fromSearch: boolean = false
+  ) => {
+    setNavigatedFromSearch(fromSearch);
+    if (fromSearch) setUserBeforeSearchNavigation(viewingUser);
     // Dismiss all modals so they do not overlay the profile screen
     setSelectedPostForComments(null);
     setSelectedPostForMenu(null);
@@ -1641,6 +1690,12 @@ export default function App() {
 
       // If this post came from community discussions and wasn't in general feed yet
       if (!foundInPosts) {
+        const hiddenFromFeed = Boolean(
+          (sourcePost?.communityId || commPost?.communityId) &&
+          (sourcePost?.feedVisible === false || commPost?.feedVisible === false)
+        );
+        if (hiddenFromFeed) return prev;
+
         const syntheticPost: Post = {
           id: postId,
           author: sourcePost?.author || (commPost ? {
@@ -1659,6 +1714,8 @@ export default function App() {
           isSaved: false,
           communityId: sourcePost?.communityId || commPost?.communityId,
           communityName: sourcePost?.communityName || commPost?.communityName,
+          challengeId: sourcePost?.challengeId,
+          feedVisible: sourcePost?.feedVisible ?? commPost?.feedVisible,
         };
         const nextList = [syntheticPost, ...prev];
         StorageService.savePosts(nextList);
@@ -1753,6 +1810,12 @@ export default function App() {
             author_id: targetAuthorId,
             content: targetPost.content || text,
             purpose: targetPost.purpose || 'Progress',
+            community_id: targetPost.communityId && isValidUUID(targetPost.communityId)
+              ? targetPost.communityId
+              : null,
+            challenge_id: targetPost.challengeId && isValidUUID(targetPost.challengeId)
+              ? targetPost.challengeId
+              : null,
             likes_count: targetPost.likesCount || 0,
             comments_count: 0,
           });
@@ -1788,6 +1851,7 @@ export default function App() {
     isDailyProof?: boolean;
     communityId?: string;
     communityName?: string;
+    challengeId?: string;
     challengeTitle?: string;
   }) => {
     const postId = getSafeUUID();
@@ -1819,6 +1883,7 @@ export default function App() {
       isDailyProof: data.isDailyProof,
       communityId: data.communityId,
       communityName: data.communityName,
+      challengeId: data.challengeId,
       challengeTitle: data.challengeTitle,
       likesCount: 0,
       creditsCount: 0,
@@ -1853,6 +1918,7 @@ export default function App() {
           purpose: data.purpose || 'Progress',
           media_urls: processedMedia,
           media_type: processedMedia.length > 0 ? 'image' : 'none',
+          challenge_id: data.challengeId && isValidUUID(data.challengeId) ? data.challengeId : null,
           credits_count: 0,
           likes_count: 0,
           comments_count: 0,
@@ -2036,11 +2102,23 @@ export default function App() {
       return;
     }
 
+    const originalPhotoUrl = post.photoUrl;
+    let cloudPhotoUrl = originalPhotoUrl;
+    if (cloudPhotoUrl?.startsWith('data:')) {
+      cloudPhotoUrl = await uploadMediaToSupabase('posts', cloudPhotoUrl, `community_post_${discId}`);
+      if (cloudPhotoUrl.startsWith('data:')) {
+        showToast('Community post saved, but its photo could not be uploaded.');
+        cloudPhotoUrl = undefined;
+      }
+    }
+    const photoUrl = cloudPhotoUrl || originalPhotoUrl;
+
     const newCommPost: CommunityPost = {
       id: discId,
       communityId: targetCommId,
       communityName: targetComm?.name,
       author: {
+        id: currentUser.id,
         name: currentUser.name,
         username: currentUser.username,
         avatar: currentUser.avatar,
@@ -2052,6 +2130,8 @@ export default function App() {
       userVote: 'up',
       timestamp: 'Just now',
       commentsCount: 0,
+      photoUrl,
+      feedVisible: StorageService.getCrossPostToFeed(),
     };
 
     setCommunityPosts((prev) => [newCommPost, ...prev.filter((item) => item.id !== discId)]);
@@ -2076,6 +2156,9 @@ export default function App() {
         timestamp: 'Just now',
         purpose: post.isDailyProof ? 'Progress' : mappedPurpose,
         content: fullContent,
+        mediaUrls: photoUrl ? [photoUrl] : undefined,
+        imageUrl: photoUrl,
+        mediaType: photoUrl ? 'image' : undefined,
         communityId: targetCommId,
         communityName: targetComm?.name,
         isDailyProof: post.isDailyProof,
@@ -2116,20 +2199,21 @@ export default function App() {
           return;
         }
 
-        if (StorageService.getCrossPostToFeed()) {
-          const { error: postError } = await supabase.from('posts').insert({
-            id: discId,
-            author_id: safeAuthorId,
-            community_id: safeCommId,
-            content: fullContent,
-            purpose: mappedPurpose,
-            likes_count: 1,
-            comments_count: 0,
-          });
-          if (postError) {
-            reportCloudSyncError('community post', postError);
-            return;
-          }
+        const { error: postError } = await supabase.from('posts').insert({
+          id: discId,
+          author_id: safeAuthorId,
+          community_id: safeCommId,
+          content: fullContent,
+          purpose: mappedPurpose,
+          media_urls: cloudPhotoUrl ? [cloudPhotoUrl] : [],
+          media_type: cloudPhotoUrl ? 'image' : 'none',
+          feed_visible: StorageService.getCrossPostToFeed(),
+          likes_count: 1,
+          comments_count: 0,
+        });
+        if (postError) {
+          reportCloudSyncError('community post', postError);
+          return;
         }
 
         const { error: voteError } = await supabase.from('post_credits').upsert({
@@ -3369,19 +3453,72 @@ export default function App() {
   const handleDeletePost = async (postId: string) => {
     const isMatch = (id?: string) => id === postId || toDeterministicUUID(id || '') === postId || id === toDeterministicUUID(postId);
 
-    // Security Authorization Check: Only the post author can delete their post!
     const targetPost = posts.find((p) => isMatch(p.id));
-    if (targetPost) {
-      const isAuthor = Boolean(
-        currentUser && (
-          (targetPost.author.id && currentUser.id && targetPost.author.id === currentUser.id) ||
-          (targetPost.author.username && currentUser.username && targetPost.author.username.toLowerCase() === currentUser.username.toLowerCase())
-        )
-      );
-      if (!isAuthor) {
-        showToast('You can only delete your own posts');
-        return;
+    if (!targetPost) {
+      showToast('Post not found.');
+      return;
+    }
+    const isAuthor = Boolean(
+      currentUser && (
+        (targetPost.author.id && currentUser.id && targetPost.author.id === currentUser.id) ||
+        (targetPost.author.username && currentUser.username && targetPost.author.username.toLowerCase() === currentUser.username.toLowerCase())
+      )
+    );
+    const targetChallenge = challenges.find((challenge) =>
+      (targetPost.challengeId && challenge.id === targetPost.challengeId) ||
+      (targetPost.challengeTitle && challenge.title.toLowerCase() === targetPost.challengeTitle.toLowerCase())
+    );
+    const isChallengeModerator = Boolean(
+      targetChallenge && (
+        (targetChallenge.creator?.id && currentUser.id && targetChallenge.creator.id === currentUser.id) ||
+        (targetChallenge.creator?.username && currentUser.username &&
+          targetChallenge.creator.username.toLowerCase() === currentUser.username.toLowerCase())
+      )
+    );
+    const targetCommunity = communities.find((community) => community.id === targetPost.communityId);
+    const isCommunityModerator = Boolean(targetCommunity && (
+      (targetCommunity.creator?.username && currentUser.username &&
+        targetCommunity.creator.username.toLowerCase() === currentUser.username.toLowerCase()) ||
+      targetCommunity.moderators?.some((moderator) =>
+        moderator.username?.toLowerCase() === currentUser.username?.toLowerCase()
+      )
+    ));
+    if (!isAuthor && !isChallengeModerator && !isCommunityModerator) {
+      showToast('Only the post author or a community/challenge moderator can delete this post.');
+      return;
+    }
+
+    try {
+      const activeUserId = await getActiveAuthUserId();
+      const safeId = toDeterministicUUID(postId);
+      if (activeUserId && isValidUUID(safeId)) {
+        const { data: existingPost, error: lookupError } = await supabase
+          .from('posts')
+          .select('id')
+          .eq('id', safeId)
+          .maybeSingle();
+        if (lookupError) {
+          console.error('Supabase post deletion lookup failed:', lookupError);
+          showToast('Post deletion failed. Please try again.');
+          return;
+        }
+        if (existingPost) {
+          const { data, error } = await supabase.from('posts').delete().eq('id', safeId).select('id').maybeSingle();
+          if (error) {
+            console.error('Supabase post deletion failed:', error);
+            showToast('Post deletion failed. Please try again.');
+            return;
+          }
+          if (!data) {
+            showToast('Post could not be deleted. Check your permissions and try again.');
+            return;
+          }
+        }
       }
+    } catch (error) {
+      console.error('Supabase post deletion failed:', error);
+      showToast('Post deletion failed. Please try again.');
+      return;
     }
 
     setPosts((prev) => {
@@ -3402,32 +3539,63 @@ export default function App() {
 
     showToast('Post deleted');
 
-    try {
-      const activeUserId = await getActiveAuthUserId();
-      if (activeUserId) {
-        const safeId = toDeterministicUUID(postId);
-        await supabase.from('posts').delete().eq('id', safeId);
-      }
-    } catch (e) {
-      console.warn('Supabase post deletion error:', e);
-    }
   };
 
   const handleDeleteComment = async (postId: string, commentId: string) => {
     const isMatch = (id?: string) => id === postId || toDeterministicUUID(id || '') === postId || id === toDeterministicUUID(postId);
+    const targetPost = posts.find((post) => isMatch(post.id)) ||
+      (selectedPostForComments && isMatch(selectedPostForComments.id) ? selectedPostForComments : null);
+    const targetComment = targetPost?.comments?.find((comment) => comment.id === commentId) ||
+      StorageService.getCommentsForPost(postId).find((comment) => comment.id === commentId);
+    const isCommentAuthor = Boolean(
+      targetComment && (
+        (targetComment.author.id && currentUser.id && targetComment.author.id === currentUser.id) ||
+        (targetComment.author.username && currentUser.username &&
+          targetComment.author.username.toLowerCase() === currentUser.username.toLowerCase())
+      )
+    );
+    const isPostOwner = Boolean(targetPost && (
+      (targetPost.author.id && currentUser.id && targetPost.author.id === currentUser.id) ||
+      (targetPost.author.username && currentUser.username &&
+        targetPost.author.username.toLowerCase() === currentUser.username.toLowerCase())
+    ));
+    if (!isCommentAuthor && !isPostOwner && !isCurrentPostModerator) {
+      showToast('You do not have permission to delete this comment.');
+      return;
+    }
 
     try {
       const activeUserId = await getActiveAuthUserId();
       const safePostId = toDeterministicUUID(postId);
       if (activeUserId && isValidUUID(safePostId) && isValidUUID(commentId)) {
-        const { error } = await supabase
+        const { data: existingComment, error: lookupError } = await supabase
           .from('post_comments')
-          .delete()
+          .select('id')
           .eq('id', commentId)
-          .eq('post_id', safePostId);
-        if (error) {
-          reportCloudSyncError('comment deletion', error);
+          .eq('post_id', safePostId)
+          .maybeSingle();
+        if (lookupError) {
+          console.error('Supabase comment deletion lookup failed:', lookupError);
+          showToast('Comment deletion failed. Please try again.');
           return;
+        }
+        if (existingComment) {
+          const { data, error } = await supabase
+            .from('post_comments')
+            .delete()
+            .eq('id', commentId)
+            .eq('post_id', safePostId)
+            .select('id')
+            .maybeSingle();
+          if (error) {
+            console.error('Supabase comment deletion failed:', error);
+            showToast('Comment deletion failed. Please try again.');
+            return;
+          }
+          if (!data) {
+            showToast('Comment could not be deleted. Check your permissions and try again.');
+            return;
+          }
         }
       }
     } catch (error) {
@@ -3467,6 +3635,15 @@ export default function App() {
         comments: updatedComments,
         commentsCount: Math.max(0, (prev.commentsCount || 1) - 1),
       };
+    });
+
+    setCommunityPosts((prev) => {
+      const updated = prev.map((post) => isMatch(post.id)
+        ? { ...post, commentsCount: Math.max(0, (post.commentsCount || 1) - 1) }
+        : post
+      );
+      StorageService.saveCommunityPosts(updated);
+      return updated;
     });
 
     showToast('Comment deleted');
@@ -3561,6 +3738,7 @@ export default function App() {
         isSaved: false,
         isDailyProof: true,
         proofDay: dayNumber,
+        challengeId: targetCh?.id,
         challengeTitle: targetCh?.title,
       };
 
@@ -3582,6 +3760,7 @@ export default function App() {
               purpose: 'Progress',
               media_urls: photoUrl ? [photoUrl] : [],
               media_type: photoUrl ? 'image' : 'none',
+              challenge_id: isValidUUID(challengeId) ? challengeId : null,
               likes_count: 0,
               comments_count: 0,
             });
@@ -3614,6 +3793,262 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleOpenSquadChats = (squad?: Squad, mode?: 'list' | 'detail') => {
+    if (squad) {
+      setActiveSquadForChat(squad);
+      setSquadChatViewMode(mode || 'detail');
+    } else {
+      setSquadChatViewMode('list');
+    }
+    setPreviousScreen(currentScreen);
+    setCurrentScreen('squad_chats');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleBackFromProfile = () => {
+    if (navigatedFromSearch) {
+      setViewingUser(userBeforeSearchNavigation || currentUser);
+      setNavigatedFromSearch(false);
+      setCurrentScreen(previousScreen);
+      setIsSearchOpen(true);
+      return;
+    }
+    handleSelectScreen(previousScreen === 'profile' ? 'home' : previousScreen);
+  };
+
+  const handleToggleSquadReaction = async (squadId: string, messageId: string, emoji: string) => {
+    const userIdentifier = currentUser.username || currentUser.id;
+    const updatedMessages = StorageService.toggleSquadMessageReaction(squadId, messageId, emoji, userIdentifier);
+    setSquadChatMessages((prev) => {
+      return prev.map((m) => {
+        if (m.id !== messageId) return m;
+        const matched = updatedMessages.find((um: any) => um.id === messageId);
+        if (matched) return matched;
+
+        const reactions = [...(m.reactions || [])];
+        const reactionIndex = reactions.findIndex((reaction) => reaction.emoji === emoji);
+        if (reactionIndex < 0) {
+          reactions.push({ emoji, count: 1, users: [userIdentifier] });
+        } else {
+          const reaction = reactions[reactionIndex];
+          const hasReacted = reaction.users.includes(userIdentifier);
+          const users = hasReacted
+            ? reaction.users.filter((user) => user !== userIdentifier)
+            : [...reaction.users, userIdentifier];
+          if (users.length === 0) reactions.splice(reactionIndex, 1);
+          else reactions[reactionIndex] = { emoji, count: users.length, users };
+        }
+        return { ...m, reactions };
+      });
+    });
+
+    try {
+      const activeUserId = await getActiveAuthUserId();
+      if (activeUserId && isValidUUID(messageId)) {
+        const { data: existingReaction, error: lookupError } = await supabase
+          .from('message_reactions')
+          .select('id')
+          .eq('message_id', messageId)
+          .eq('user_id', activeUserId)
+          .eq('emoji', emoji)
+          .maybeSingle();
+        if (lookupError) {
+          reportCloudSyncError('squad reaction', lookupError);
+          return;
+        }
+
+        let error: { message: string } | null = null;
+        if (existingReaction) {
+          ({ error } = await supabase.from('message_reactions').delete().eq('id', existingReaction.id));
+        } else {
+          ({ error } = await supabase.from('message_reactions').insert({
+            message_id: messageId,
+            user_id: activeUserId,
+            emoji,
+          }));
+        }
+        if (error) reportCloudSyncError('squad reaction', error);
+      }
+    } catch (e) {
+      console.error('Squad reaction sync failed:', e);
+      showToast('Reaction saved on this device, but cloud sync failed.');
+    }
+  };
+
+  const handleMarkSquadMessagesAsRead = async (squadId: string) => {
+    const userIdentifier = currentUser.username || currentUser.id;
+    const updated = StorageService.markSquadMessagesAsRead(squadId, userIdentifier);
+    const readAt = new Date().toISOString();
+    setSquadChatMessages((prev) => {
+      return prev.map((m) => {
+        if (m.squadId !== squadId) return m;
+        const match = updated.find((um: any) => um.id === m.id);
+        if (match) return match;
+        const isSender = m.author?.id === currentUser.id ||
+          m.author?.username?.toLowerCase() === currentUser.username?.toLowerCase();
+        return isSender || m.read_at ? m : { ...m, read_at: readAt };
+      });
+    });
+
+    try {
+      const activeUserId = await getActiveAuthUserId();
+      if (activeUserId && isValidUUID(squadId)) {
+        const { error } = await supabase
+          .from('squad_chat_messages')
+          .update({ read_at: new Date().toISOString() })
+          .eq('squad_id', squadId)
+          .neq('sender_id', activeUserId)
+          .is('read_at', null);
+        if (error) {
+          console.error('Squad read receipt sync failed:', error);
+          showToast('Read receipts could not be synced.');
+        }
+      }
+    } catch (error) {
+      console.error('Squad read receipt sync failed:', error);
+      showToast('Read receipts could not be synced.');
+    }
+  };
+
+  const handleDeleteCommunityPost = async (postId: string) => {
+    const communityPost = communityPosts.find((post) => post.id === postId);
+    const feedPost = posts.find((post) => post.id === postId);
+    const author = communityPost?.author || feedPost?.author;
+    const isAuthor = Boolean(
+      author && (
+        (author.id && currentUser.id && author.id === currentUser.id) ||
+        (author.username && currentUser.username && author.username.toLowerCase() === currentUser.username.toLowerCase())
+      )
+    );
+    const community = communities.find((item) =>
+      item.id === (communityPost?.communityId || feedPost?.communityId)
+    );
+    const isModerator = Boolean(
+      community && (
+        (community.creator?.username && currentUser.username &&
+          community.creator.username.toLowerCase() === currentUser.username.toLowerCase()) ||
+        community.moderators?.some((moderator) =>
+          moderator.username?.toLowerCase() === currentUser.username?.toLowerCase()
+        )
+      )
+    );
+    if (!isAuthor && !isModerator) {
+      showToast('Only the post author or community moderator can delete this post.');
+      return;
+    }
+
+    try {
+      const activeUserId = await getActiveAuthUserId();
+      if (activeUserId && isValidUUID(postId)) {
+        const { data: existingPost, error: lookupError } = await supabase
+          .from('posts')
+          .select('id')
+          .eq('id', postId)
+          .maybeSingle();
+        if (lookupError) {
+          console.error('Supabase community post deletion lookup failed:', lookupError);
+          showToast('Community post deletion failed. Please try again.');
+          return;
+        }
+        if (existingPost) {
+          const { data, error } = await supabase
+            .from('posts')
+            .delete()
+            .eq('id', postId)
+            .select('id')
+            .maybeSingle();
+          if (error) {
+            console.error('Supabase community post deletion failed:', error);
+            showToast('Community post deletion failed. Please try again.');
+            return;
+          }
+          if (!data) {
+            showToast('Community post could not be deleted. Check your permissions and try again.');
+            return;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Community post deletion failed:', error);
+      showToast('Community post deletion failed. Please try again.');
+      return;
+    }
+
+    setCommunityPosts((prev) => prev.filter((p) => p.id !== postId));
+    setPosts((prev) => prev.filter((p) => p.id !== postId));
+    showToast('Community post removed');
+  };
+
+  const handleDeleteCohortProof = async (challengeId: string, proofId: string): Promise<boolean> => {
+    const challenge = challenges.find((item) => item.id === challengeId);
+    const proof = challenge?.squadProofs?.find((item) => item.id === proofId);
+    const isAuthor = Boolean(proof && (
+      (proof.author.id && currentUser.id && proof.author.id === currentUser.id) ||
+      (proof.author.username && currentUser.username &&
+        proof.author.username.toLowerCase() === currentUser.username.toLowerCase())
+    ));
+    const isModerator = Boolean(challenge && (
+      (challenge.creator?.id && currentUser.id && challenge.creator.id === currentUser.id) ||
+      (challenge.creator?.username && currentUser.username &&
+        challenge.creator.username.toLowerCase() === currentUser.username.toLowerCase())
+    ));
+    if (!isAuthor && !isModerator) {
+      showToast('Only the proof author or challenge moderator can delete this proof.');
+      return false;
+    }
+
+    try {
+      const activeUserId = await getActiveAuthUserId();
+      if (activeUserId && isValidUUID(proofId) && isValidUUID(challengeId)) {
+        const { data: existingProof, error: lookupError } = await supabase
+          .from('cohort_proofs')
+          .select('id')
+          .eq('id', proofId)
+          .eq('challenge_id', challengeId)
+          .maybeSingle();
+        if (lookupError) {
+          console.error('Supabase challenge proof deletion lookup failed:', lookupError);
+          showToast('Challenge proof deletion failed. Please try again.');
+          return false;
+        }
+        if (existingProof) {
+          const { data, error } = await supabase
+            .from('cohort_proofs')
+            .delete()
+            .eq('id', proofId)
+            .eq('challenge_id', challengeId)
+            .select('id')
+            .maybeSingle();
+          if (error) {
+            console.error('Supabase challenge proof deletion failed:', error);
+            showToast('Challenge proof deletion failed. Please try again.');
+            return false;
+          }
+          if (!data) {
+            showToast('Challenge proof could not be deleted. Check your permissions and try again.');
+            return false;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Challenge proof deletion failed:', error);
+      showToast('Challenge proof deletion failed. Please try again.');
+      return false;
+    }
+
+    setChallenges((prev) =>
+      prev.map((c) => {
+        if (c.id !== challengeId) return c;
+        return {
+          ...c,
+          squadProofs: (c.squadProofs || []).filter((p) => p.id !== proofId),
+        };
+      })
+    );
+    showToast('Challenge proof deleted');
+    return true;
+  };
+
   const handleOpenCommunityHub = (community: Community) => {
     setActiveCommunity(community);
     setPreviousScreen(currentScreen);
@@ -3632,6 +4067,31 @@ export default function App() {
     setPreviousScreen(currentScreen);
     setCurrentScreen('accountability_hub');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const isModeratorForPost = (post: Post): boolean => {
+    const sameUser = (user?: { id?: string; username?: string }) => Boolean(
+      user && (
+        (user.id && currentUser.id && user.id === currentUser.id) ||
+        (user.username && currentUser.username && user.username.toLowerCase() === currentUser.username.toLowerCase())
+      )
+    );
+    const community = communities.find((item) => item.id === post.communityId);
+    if (
+      community &&
+      (sameUser(community.creator) || community.moderators?.some((moderator) => sameUser(moderator)))
+    ) return true;
+
+    const challenge = challenges.find((item) =>
+      (post.challengeId && item.id === post.challengeId) ||
+      (post.challengeTitle && item.title.toLowerCase() === post.challengeTitle.toLowerCase())
+    );
+    return Boolean(challenge && sameUser(challenge.creator));
+  };
+
+  const handleOpenPostComments = (post: Post, moderator?: boolean) => {
+    setIsCurrentPostModerator(moderator ?? isModeratorForPost(post));
+    setSelectedPostForComments(post);
   };
 
   const handleToggleHubPrivacy = (targetPrivacy?: 'public' | 'private') => {
@@ -3754,7 +4214,7 @@ export default function App() {
             onToggleLike={handleToggleLike}
             onToggleDiscredit={handleToggleDiscredit}
             onToggleSave={handleToggleSave}
-            onOpenComments={(post) => setSelectedPostForComments(post)}
+            onOpenComments={(post) => handleOpenPostComments(post)}
             onOpenPostMenu={(post) => setSelectedPostForMenu(post)}
             onOpenShare={(post) => setSelectedPostForShare(post)}
             onNavigateAuthorProfile={(author) => handleNavigateToUser(author)}
@@ -3775,6 +4235,7 @@ export default function App() {
             onCheckIn={handleIncrementChallenge}
             onNavigateUser={(user) => handleNavigateToUser(user)}
             onOpenCohortDiscussions={handleOpenCohortDiscussions}
+            onOpenSquadChats={handleOpenSquadChats}
             onAddToTodoList={handleAddToTodoList}
             onToggleFollow={handleToggleFollow}
             toDoChallengeIds={toDoList.filter(t => t.challengeId).map(t => t.challengeId!)}
@@ -3827,9 +4288,9 @@ export default function App() {
             allCommunities={communities}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onOpenEditProfile={() => setIsEditProfileOpen(true)}
-            onSelectPost={(post) => setSelectedPostForComments(post)}
+            onSelectPost={(post) => handleOpenPostComments(post)}
             onSelectChallenge={handleOpenChallengeDetail}
-            onBack={() => handleSelectScreen(previousScreen === 'profile' ? 'home' : previousScreen)}
+            onBack={handleBackFromProfile}
             onToggleFollow={handleToggleFollow}
             onSelectUser={(u) => handleNavigateToUser(u)}
             onOpenAccountabilityHub={(targetUser) => handleOpenAccountabilityHub(targetUser)}
@@ -3837,7 +4298,9 @@ export default function App() {
             onSelectCommunity={(comm) => handleOpenCommunityHub(comm)}
             onOpenShare={(post) => setSelectedPostForShare(post)}
             onToggleSave={handleToggleSave}
+            onToggleLike={handleToggleLike}
             onDeletePost={handleDeletePost}
+            canDeletePost={isModeratorForPost}
           />
         );
       case 'accountability_hub':
@@ -3887,9 +4350,26 @@ export default function App() {
             onToggleFollow={handleToggleFollow}
             onAddProof={handleAddCohortProof}
             onVerifyProof={handleVerifyCohortProof}
+            onDeleteProof={handleDeleteCohortProof}
           />
         );
       }
+      case 'squad_chats':
+        return (
+          <SquadChatsScreen
+            squads={squads}
+            challenges={challenges}
+            currentUser={currentUser}
+            initialSquad={activeSquadForChat}
+            initialViewMode={squadChatViewMode}
+            messages={squadChatMessages}
+            onBack={() => handleSelectScreen(previousScreen === 'squad_chats' ? 'challenges' : previousScreen)}
+            onSendMessage={handleSendSquadMessage}
+            onToggleReaction={handleToggleSquadReaction}
+            onMarkMessagesAsRead={handleMarkSquadMessagesAsRead}
+            onNavigateUser={(user) => handleNavigateToUser(user)}
+          />
+        );
       case 'community_hub': {
         const targetCommunity = activeCommunity || communities[0];
         if (!targetCommunity) {
@@ -3919,11 +4399,13 @@ export default function App() {
             communityPosts={communityPosts}
             onCreateDiscussion={handleCreateCommunityDiscussion}
             onVoteDiscussion={handleVoteDiscussion}
-            onOpenComments={(post) => {
+            onOpenComments={(post, moderator) => {
               const postWithComments = posts.find((item) => item.id === post.id);
-              setSelectedPostForComments(postWithComments || post);
+              handleOpenPostComments(postWithComments || post, moderator);
             }}
             onOpenShare={(post) => setSelectedPostForShare(post)}
+            onDeletePost={handleDeleteCommunityPost}
+            allPosts={posts}
           />
         );
       }
@@ -4212,6 +4694,7 @@ export default function App() {
         onAddComment={handleAddComment}
         onDeleteComment={handleDeleteComment}
         onNavigateAuthorProfile={(author) => handleNavigateToUser(author)}
+        isModerator={isCurrentPostModerator}
       />
 
       <ChallengeDetailModal
@@ -4237,10 +4720,12 @@ export default function App() {
           challenges={challenges}
           creators={allCreators}
           onClose={() => setIsSearchOpen(false)}
-          onSelectPost={(post) => setSelectedPostForComments(post)}
+          onSelectPost={(post) => handleOpenPostComments(post)}
           onSelectCommunity={(comm) => handleOpenCommunityHub(comm)}
           onSelectChallenge={(ch) => handleOpenChallengeDetail(ch)}
-          onNavigateAuthorProfile={(author) => handleNavigateToUser(author)}
+          initialQuery={searchQuery}
+          onQueryChange={setSearchQuery}
+          onNavigateAuthorProfile={(author) => handleNavigateToUser(author, true)}
         />
       )}
 
@@ -4288,6 +4773,7 @@ export default function App() {
       <PostMenuModal
         post={selectedPostForMenu}
         currentUser={currentUser}
+        isModerator={selectedPostForMenu ? isModeratorForPost(selectedPostForMenu) : false}
         onClose={() => setSelectedPostForMenu(null)}
         onToggleSave={handleToggleSave}
         onCopyLink={() => {

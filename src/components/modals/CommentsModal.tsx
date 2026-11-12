@@ -9,6 +9,7 @@ interface CommentsModalProps {
   onAddComment: (postId: string, text: string) => void;
   onDeleteComment?: (postId: string, commentId: string) => void;
   onNavigateAuthorProfile?: (author: Author) => void;
+  isModerator?: boolean;
 }
 
 export const CommentsModal: React.FC<CommentsModalProps> = ({
@@ -18,6 +19,7 @@ export const CommentsModal: React.FC<CommentsModalProps> = ({
   onAddComment,
   onDeleteComment,
   onNavigateAuthorProfile,
+  isModerator = false,
 }) => {
   const [commentText, setCommentText] = useState('');
 
@@ -111,6 +113,7 @@ export const CommentsModal: React.FC<CommentsModalProps> = ({
                 </p>
                 <div className="flex items-center justify-end text-[11px] text-[#9298A3] pt-0.5">
                   {Boolean(
+                    isModerator ||
                     (comment.author.username && currentUser?.username && comment.author.username.toLowerCase() === currentUser.username.toLowerCase()) ||
                     (comment.author.id && currentUser?.id && comment.author.id === currentUser.id) ||
                     (post.author.username && currentUser?.username && post.author.username.toLowerCase() === currentUser.username.toLowerCase()) ||
@@ -122,9 +125,11 @@ export const CommentsModal: React.FC<CommentsModalProps> = ({
                       onClick={() => onDeleteComment(post.id, comment.id)}
                       className="text-[#9298A3] hover:text-red-400 p-0.5 transition-colors cursor-pointer"
                       title={
-                        (post.author.username && currentUser?.username && post.author.username.toLowerCase() === currentUser.username.toLowerCase()) ||
-                        (post.author.id && currentUser?.id && post.author.id === currentUser.id) ||
-                        post.author.isCurrentUser
+                        isModerator
+                          ? "Moderator: Delete comment"
+                          : (post.author.username && currentUser?.username && post.author.username.toLowerCase() === currentUser.username.toLowerCase()) ||
+                            (post.author.id && currentUser?.id && post.author.id === currentUser.id) ||
+                            post.author.isCurrentUser
                           ? "Delete comment on your post"
                           : "Delete your comment"
                       }

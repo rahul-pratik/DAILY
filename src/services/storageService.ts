@@ -229,11 +229,86 @@ export const StorageService = {
     return safeParse<any[]>(key, []);
   },
 
-  addSquadChatMessage(squadId: string, message: any): any[] {
+  saveSquadChatMessages(squadId: string, messages: any[]): void {
     const key = `daily_app_squad_chat_${squadId}`;
+    safeSet(key, messages);
+  },
+
+  addSquadChatMessage(squadId: string, message: any): any[] {
     const current = this.getSquadChatMessages(squadId);
     const updated = [...current, message];
-    safeSet(key, updated);
+    this.saveSquadChatMessages(squadId, updated);
+    return updated;
+  },
+
+  markSquadMessagesAsRead(squadId: string, readerUsernameOrId: string): any[] {
+    const current = this.getSquadChatMessages(squadId);
+    let changed = false;
+    const nowIso = new Date().toISOString();
+    const updated = current.map((msg: any) => {
+      const isSender = (msg.author?.username && msg.author.username === readerUsernameOrId) ||
+                       (msg.sender?.username && msg.sender.username === readerUsernameOrId) ||
+                       (msg.author?.id && msg.author.id === readerUsernameOrId) ||
+                       (msg.sender?.id && msg.sender.id === readerUsernameOrId);
+      if (!isSender) {
+        const readBy = Array.isArray(msg.readBy) ? msg.readBy : [];
+        if (!readBy.includes(readerUsernameOrId)) {
+          changed = true;
+          return {
+            ...msg,
+            read_at: msg.read_at || nowIso,
+            readBy: [...readBy, readerUsernameOrId],
+          };
+        }
+      }
+      return msg;
+    });
+    if (changed) {
+      this.saveSquadChatMessages(squadId, updated);
+    }
+    return updated;
+  },
+
+  toggleSquadMessageReaction(squadId: string, messageId: string, emoji: string, usernameOrId: string): any[] {
+    const current = this.getSquadChatMessages(squadId);
+    const updated = current.map((msg: any) => {
+      if (msg.id !== messageId) return msg;
+      const reactions = Array.isArray(msg.reactions) ? [...msg.reactions] : [];
+      const existingReactionIndex = reactions.findIndex((r) => r.emoji === emoji);
+      if (existingReactionIndex > -1) {
+        const existing = reactions[existingReactionIndex];
+        const hasUser = existing.users.includes(usernameOrId);
+        if (hasUser) {
+          const newUsers = existing.users.filter((u: string) => u !== usernameOrId);
+          if (newUsers.length === 0) {
+            reactions.splice(existingReactionIndex, 1);
+          } else {
+            reactions[existingReactionIndex] = {
+              ...existing,
+              count: newUsers.length,
+              users: newUsers,
+            };
+          }
+        } else {
+          reactions[existingReactionIndex] = {
+            ...existing,
+            count: existing.count + 1,
+            users: [...existing.users, usernameOrId],
+          };
+        }
+      } else {
+        reactions.push({
+          emoji,
+          count: 1,
+          users: [usernameOrId],
+        });
+      }
+      return {
+        ...msg,
+        reactions,
+      };
+    });
+    this.saveSquadChatMessages(squadId, updated);
     return updated;
   },
 
@@ -385,16 +460,49 @@ export const StorageService = {
     return safeParse<string[]>(KEYS.CUSTOM_HASHTAGS, []);
   },
 
-  addCustomHashtag(tag: string): string[] {
+  getAllKnownHashtags(): string[] {
+    const custom = this.getCustomHashtags();
+    const defaults = ['#Coding', '#Reading', '#Fitness', '#Building', '#AI & Tech', '#Habits', '#Startups', '#Design', '#Writing', '#Creativity'];
+
+    // Also scan all communities & challenges
+    const commTags: string[] = [];
+    (this.getCommunities() || []).forEach((c) => {
+      (c.tags || []).forEach((t) => commTags.push(t.startsWith('#') ? t : `#${t}`));
+      if (c.category) commTags.push(c.category.startsWith('#') ? c.category : `#${c.category}`);
+    });
+
+    const challengeTags: string[] = [];
+    (this.getChallenges() || []).forEach((ch) => {
+      (ch.tags || []).forEach((t) => challengeTags.push(t.startsWith('#') ? t : `#${t}`));
+      if (ch.category) challengeTags.push(ch.category.startsWith('#') ? ch.category : `#${ch.category}`);
+    });
+
+    const combined = [...defaults, ...custom, ...commTags, ...challengeTags];
+    const uniqueMap = new Map<string, string>();
+    combined.forEach((t) => {
+      const clean = t.trim().startsWith('#') ? t.trim() : `#${t.trim()}`;
+      if (clean && clean !== '#' && !uniqueMap.has(clean.toLowerCase())) {
+        uniqueMap.set(clean.toLowerCase(), clean);
+      }
+    });
+
+    return Array.from(uniqueMap.values());
+  },
+
+  addCustomHashtag(tag: string): { tags: string[]; isNew: boolean; canonicalTag: string } {
     const cleaned = tag.trim().startsWith('#') ? tag.trim() : `#${tag.trim()}`;
-    if (!cleaned || cleaned === '#') return this.getCustomHashtags();
-    const existing = this.getCustomHashtags();
-    if (!existing.some((t) => t.toLowerCase() === cleaned.toLowerCase())) {
-      const updated = [...existing, cleaned];
-      safeSet(KEYS.CUSTOM_HASHTAGS, updated);
-      return updated;
+    if (!cleaned || cleaned === '#') {
+      return { tags: this.getCustomHashtags(), isNew: false, canonicalTag: '#General' };
     }
-    return existing;
+    const allKnown = this.getAllKnownHashtags();
+    const existing = allKnown.find((t) => t.toLowerCase() === cleaned.toLowerCase());
+    if (existing) {
+      return { tags: this.getCustomHashtags(), isNew: false, canonicalTag: existing };
+    }
+    const currentCustom = this.getCustomHashtags();
+    const updated = [...currentCustom, cleaned];
+    safeSet(KEYS.CUSTOM_HASHTAGS, updated);
+    return { tags: updated, isNew: true, canonicalTag: cleaned };
   },
 
   clearDemoContent(): void {
