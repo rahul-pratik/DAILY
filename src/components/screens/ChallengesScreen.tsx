@@ -428,7 +428,7 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
             const isEntered = entrySession?.status === 'entered' || squadCh?.joined;
             const acceptedCount = entrySession?.acceptedUsernames.length || 0;
 
-            const currentDay = squadCh?.current || 1;
+            const currentDay = squadCh?.current ?? 0;
 
             return (
               <div key={squad.id} className="p-4 sm:p-5 rounded-2xl bg-[#080B10] border border-[#1C2230] space-y-4 hover:border-[#2166FF]/30 transition-all shadow-sm">

@@ -141,8 +141,8 @@ export const AccountabilityHubScreen: React.FC<AccountabilityHubScreenProps> = (
     setShowAddForm(false);
   };
 
-  // Proofs computation for the selected completed challenge
-  const activeChallengeProofs: CohortProof[] = selectedCompletedChallenge?.squadProofs || [];
+  // Proofs computation for the selected completed challenge (only verified photos)
+  const activeChallengeProofs: CohortProof[] = (selectedCompletedChallenge?.squadProofs || []).filter((p) => p.verified === true);
   
   const filteredProofs = activeChallengeProofs.filter((p) => {
     if (!proofSearchQuery.trim()) return true;

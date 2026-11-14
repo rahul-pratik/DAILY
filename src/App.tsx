@@ -269,7 +269,7 @@ export default function App() {
         activeAuthId ? supabase.from('post_likes').select('post_id').eq('user_id', activeAuthId) : Promise.resolve({ data: [] }),
         activeAuthId ? supabase.from('post_credits').select('post_id, vote_type').eq('user_id', activeAuthId) : Promise.resolve({ data: [] }),
         activeAuthId ? supabase.from('post_bookmarks').select('post_id').eq('user_id', activeAuthId) : Promise.resolve({ data: [] }),
-        activeAuthId ? supabase.from('challenge_participants').select('challenge_id, current_progress').eq('user_id', activeAuthId) : Promise.resolve({ data: [] }),
+        supabase.from('challenge_participants').select('challenge_id, user_id, current_progress'),
         activeAuthId ? supabase.from('community_members').select('community_id').eq('user_id', activeAuthId) : Promise.resolve({ data: [] }),
         activeAuthId ? supabase.from('todos').select('*').eq('user_id', activeAuthId).order('created_at', { ascending: false }) : Promise.resolve({ data: [] }),
         activeAuthId
@@ -388,9 +388,17 @@ export default function App() {
         remoteBookmarkedSet = new Set(((userBookmarksRes.data as any[]) || []).map((r: any) => r.post_id));
         StorageService.saveUserBookmarks(Array.from(remoteBookmarkedSet), activeAuthId);
 
+        const participantCountMap = new Map<string, Set<string>>();
         ((userParticipantsRes.data as any[]) || []).forEach((row: any) => {
-          joinedChallengeIds.add(row.challenge_id);
-          participantProgressMap.set(row.challenge_id, row.current_progress);
+          if (row.challenge_id && row.user_id) {
+            const set = participantCountMap.get(row.challenge_id) || new Set<string>();
+            set.add(row.user_id);
+            participantCountMap.set(row.challenge_id, set);
+          }
+          if (row.user_id === activeAuthId) {
+            joinedChallengeIds.add(row.challenge_id);
+            participantProgressMap.set(row.challenge_id, row.current_progress ?? 0);
+          }
         });
 
         ((userMembershipsRes.data as any[]) || []).forEach((row: any) => {
@@ -618,11 +626,20 @@ export default function App() {
         commPostsFromDb = StorageService.getCommunityPosts() || [];
       }
 
-      // 6. Process Cohort Proofs
+      // 6. Process Cohort Proofs (merging credits from post_credits + local credits)
+      const localCreditedSet = new Set(StorageService.getUserCredits(effectiveUserId));
       const proofsByChallenge = new Map<string, CohortProof[]>();
       ((cohortProofsRes.data as any[]) || []).forEach((cp: any) => {
         const p = profileMap.get(cp.author_id);
         const arr = proofsByChallenge.get(cp.challenge_id) || [];
+        const hasCreditVote = remoteVoteByPost.get(cp.id) === 'credit' ||
+          remoteLikedSet.has(cp.id) ||
+          localCreditedSet.has(cp.id);
+        const hasCreditRows = netCreditsByPost.has(cp.id);
+        const resolvedLikesCount = hasCreditRows
+          ? Math.max(0, netCreditsByPost.get(cp.id) || 0)
+          : Math.max(cp.likes_count || 0, hasCreditVote ? 1 : 0);
+
         arr.push({
           id: cp.id,
           challengeId: cp.challenge_id,
@@ -640,20 +657,30 @@ export default function App() {
           note: cp.note,
           photoUrl: cp.photo_url,
           timestamp: new Date(cp.created_at).toLocaleDateString(),
-          likesCount: cp.likes_count || 0,
-          isLiked: false,
+          likesCount: resolvedLikesCount,
+          isLiked: hasCreditVote,
           verified: cp.verified ?? false,
         });
         proofsByChallenge.set(cp.challenge_id, arr);
       });
 
       // 7. Process Challenges
+      const participantTotalsByChallenge = new Map<string, number>();
+      ((userParticipantsRes.data as any[]) || []).forEach((row: any) => {
+        if (row.challenge_id) {
+          participantTotalsByChallenge.set(
+            row.challenge_id,
+            (participantTotalsByChallenge.get(row.challenge_id) || 0) + 1
+          );
+        }
+      });
+
       const dbChallenges = challengesRes.data || [];
       if (dbChallenges.length > 0) {
         const localChallenges = StorageService.getChallenges() || [];
         const mappedChallenges: Challenge[] = dbChallenges.map((c: any) => {
           const isJoined = joinedChallengeIds.has(c.id);
-          const currentDay = participantProgressMap.get(c.id) ?? (isJoined ? 1 : 0);
+          const currentDay = participantProgressMap.get(c.id) ?? 0;
           const creatorProfile = profileMap.get(c.creator_id);
           const challengeProofs = proofsByChallenge.get(c.id) || [];
           const localChallenge = localChallenges.find((challenge) => challenge.id === c.id);
@@ -662,6 +689,11 @@ export default function App() {
             ...challengeProofs,
             ...(localChallenge?.squadProofs || []).filter((proof) => !remoteProofIds.has(proof.id)),
           ];
+          const computedParticipants = Math.max(
+            c.participants_count || 0,
+            participantTotalsByChallenge.get(c.id) || 0,
+            isJoined ? 1 : 0
+          );
 
           return {
             id: c.id,
@@ -679,9 +711,9 @@ export default function App() {
             maxSquadSize: c.max_squad_size,
             tags: c.tags || [],
             icon: c.icon,
-            status: c.status,
+            status: currentDay >= c.target ? 'completed' : isJoined ? 'active' : (c.status || 'explore'),
             joined: isJoined,
-            participantsCount: c.participants_count || 0,
+            participantsCount: computedParticipants,
             squadProofs: mergedProofs,
             creator: creatorProfile ? {
               id: creatorProfile.id,
@@ -698,6 +730,8 @@ export default function App() {
 
         setChallenges(finalMergedChallenges);
         StorageService.saveChallenges(finalMergedChallenges);
+        setActiveChallenge((prev) => prev ? finalMergedChallenges.find((c) => c.id === prev.id) || prev : prev);
+        setSelectedChallenge((prev) => prev ? finalMergedChallenges.find((c) => c.id === prev.id) || prev : prev);
       }
 
       // 8. Process Communities
@@ -806,15 +840,15 @@ export default function App() {
 
       const challengeProofNotifs: NotificationItem[] = [];
       ((cohortProofsRes.data as any[]) || []).forEach((cp: any) => {
-        if (joinedChallengeIdSet.has(cp.challenge_id)) {
-          const authorProf = profileMap.get(cp.user_id);
-          const isMe = cp.user_id === activeAuthId || authorProf?.username === currentUser.username;
+        if (cp.verified === true && joinedChallengeIdSet.has(cp.challenge_id)) {
+          const authorProf = profileMap.get(cp.author_id);
+          const isMe = cp.author_id === activeAuthId || authorProf?.username === currentUser.username;
           if (!isMe) {
             const chTitle = (challengesRes.data || []).find((c: any) => c.id === cp.challenge_id)?.title || 'Sprint';
             challengeProofNotifs.push({
               id: `notif-proof-${cp.id}`,
               user: {
-                id: cp.user_id,
+                id: cp.author_id,
                 name: authorProf?.name || 'Challenger',
                 username: authorProf?.username || 'challenger',
                 avatar: authorProf?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
@@ -2339,6 +2373,14 @@ export default function App() {
       processedMedia = rawMedia;
     }
 
+    const isChallengeWithPhoto = Boolean(data.challengeId && processedMedia.length > 0);
+    const targetChallenge = data.challengeId
+      ? challenges.find((c) => c.id === data.challengeId)
+      : undefined;
+    const nextProofDay = targetChallenge
+      ? Math.min((targetChallenge.current || 0) + 1, targetChallenge.target)
+      : undefined;
+
     const newPost: Post = {
       id: postId,
       author: currentUser,
@@ -2346,7 +2388,8 @@ export default function App() {
       purpose: data.purpose,
       content: data.content,
       mediaUrls: processedMedia,
-      isDailyProof: data.isDailyProof,
+      isDailyProof: data.isDailyProof || isChallengeWithPhoto,
+      proofDay: nextProofDay,
       communityId: data.communityId,
       communityName: data.communityName,
       challengeId: data.challengeId,
@@ -2356,13 +2399,55 @@ export default function App() {
       commentsCount: 0,
       isLiked: false,
       isSaved: false,
+      feedVisible: !isChallengeWithPhoto,
     };
 
-    const updatedPosts = [newPost, ...posts];
-    setPosts(updatedPosts);
-    StorageService.savePosts(updatedPosts);
+    // Unverified challenge photos never appear directly in feed until moderator verifies
+    if (!isChallengeWithPhoto) {
+      const updatedPosts = [newPost, ...posts];
+      setPosts(updatedPosts);
+      StorageService.savePosts(updatedPosts);
+    }
+
+    if (targetChallenge && nextProofDay !== undefined) {
+      const newProofObj: CohortProof | null = isChallengeWithPhoto
+        ? {
+            id: postId,
+            challengeId: targetChallenge.id,
+            author: currentUser,
+            dayNumber: nextProofDay,
+            note: data.content,
+            photoUrl: processedMedia[0],
+            timestamp: 'Just now',
+            likesCount: 0,
+            isLiked: false,
+            verified: false,
+          }
+        : null;
+
+      const applyChallengePostUpdate = (ch: Challenge): Challenge => ({
+        ...ch,
+        joined: true,
+        current: nextProofDay,
+        status: nextProofDay >= ch.target ? 'completed' : 'active',
+        squadProofs: newProofObj ? [newProofObj, ...(ch.squadProofs || [])] : ch.squadProofs,
+      });
+
+      setChallenges((prev) => {
+        const updated = prev.map((c) => (c.id === targetChallenge.id ? applyChallengePostUpdate(c) : c));
+        StorageService.saveChallenges(updated);
+        return updated;
+      });
+      setActiveChallenge((prev) => (prev?.id === targetChallenge.id ? applyChallengePostUpdate(prev) : prev));
+      setSelectedChallenge((prev) => (prev?.id === targetChallenge.id ? applyChallengePostUpdate(prev) : prev));
+    }
+
     setCurrentScreen('home');
-    showToast('Your work has been shared to Daily');
+    showToast(
+      isChallengeWithPhoto
+        ? 'Submitted to challenge! Photo awaits moderator verification before appearing in feed.'
+        : 'Your work has been shared to Daily'
+    );
 
     // Persist post and author profile to Supabase
     try {
@@ -2376,6 +2461,9 @@ export default function App() {
         // Ensure author profile is synced
         await syncProfileToSupabase({ ...currentUser, id: activeAuthorId! });
 
+        const safeChallengeId = data.challengeId ? toDeterministicUUID(data.challengeId) : null;
+        const safeCommunityId = data.communityId ? toDeterministicUUID(data.communityId) : null;
+
         // Insert post into public.posts
         const { error: insertErr } = await supabase.from('posts').insert({
           id: postId,
@@ -2384,7 +2472,9 @@ export default function App() {
           purpose: data.purpose || 'Progress',
           media_urls: processedMedia,
           media_type: processedMedia.length > 0 ? 'image' : 'none',
-          challenge_id: data.challengeId && isValidUUID(data.challengeId) ? data.challengeId : null,
+          community_id: safeCommunityId && isValidUUID(safeCommunityId) ? safeCommunityId : null,
+          challenge_id: safeChallengeId && isValidUUID(safeChallengeId) ? safeChallengeId : null,
+          feed_visible: !isChallengeWithPhoto,
           credits_count: 0,
           likes_count: 0,
           comments_count: 0,
@@ -2392,6 +2482,27 @@ export default function App() {
 
         if (insertErr) {
           console.warn('Supabase post insert notice:', insertErr.message);
+        }
+
+        if (targetChallenge && safeChallengeId && isValidUUID(safeChallengeId) && nextProofDay !== undefined) {
+          if (isChallengeWithPhoto) {
+            await supabase.from('cohort_proofs').upsert({
+              id: postId,
+              challenge_id: safeChallengeId,
+              author_id: activeAuthorId,
+              day_number: nextProofDay,
+              note: data.content,
+              photo_url: processedMedia[0]?.startsWith('data:') ? null : processedMedia[0] || null,
+              likes_count: 0,
+              verified: false,
+            });
+          }
+
+          await supabase.from('challenge_participants').upsert({
+            challenge_id: safeChallengeId,
+            user_id: activeAuthorId,
+            current_progress: nextProofDay,
+          }, { onConflict: 'challenge_id,user_id' });
         }
       }
     } catch (e) {
@@ -2770,11 +2881,13 @@ export default function App() {
   };
 
   // Interactions: Challenge Progress Log / Check In
-  const handleIncrementChallenge = (challengeId: string) => {
-    setChallenges((prev) =>
-      prev.map((ch) => {
+  const handleIncrementChallenge = async (challengeId: string) => {
+    let nextProgress = 0;
+    setChallenges((prev) => {
+      const updated = prev.map((ch) => {
         if (ch.id === challengeId) {
           const newCurrent = Math.min(ch.target, ch.current + 1);
+          nextProgress = newCurrent;
           const isNowCompleted = newCurrent >= ch.target;
           if (isNowCompleted && ch.current < ch.target) {
             showToast(`🎉 Challenge Completed: ${ch.title}!`);
@@ -2783,15 +2896,17 @@ export default function App() {
           }
           return {
             ...ch,
+            joined: true,
             current: newCurrent,
-            status: isNowCompleted ? 'completed' : 'active',
+            status: (isNowCompleted ? 'completed' : 'active') as 'completed' | 'active',
           };
         }
         return ch;
-      })
-    );
+      });
+      StorageService.saveChallenges(updated);
+      return updated;
+    });
 
-    // Keep active modal in sync
     setSelectedChallenge((prev) => {
       if (prev && prev.id === challengeId) {
         const newCurrent = Math.min(prev.target, prev.current + 1);
@@ -2805,7 +2920,6 @@ export default function App() {
       return prev;
     });
 
-    // Keep activeChallenge in sync so ChallengeDetailScreen updates immediately
     setActiveChallenge((prev) => {
       if (prev && prev.id === challengeId) {
         const newCurrent = Math.min(prev.target, prev.current + 1);
@@ -2818,30 +2932,51 @@ export default function App() {
       }
       return prev;
     });
+
+    try {
+      const activeUserId = await getActiveAuthUserId();
+      const safeChallengeId = toDeterministicUUID(challengeId);
+      if (activeUserId && isValidUUID(safeChallengeId)) {
+        await syncProfileToSupabase({ ...currentUser, id: activeUserId });
+        const { error } = await supabase.from('challenge_participants').upsert({
+          challenge_id: safeChallengeId,
+          user_id: activeUserId,
+          current_progress: nextProgress,
+        }, { onConflict: 'challenge_id,user_id' });
+        if (error) reportCloudSyncError('challenge check-in', error);
+      }
+    } catch (error) {
+      console.warn('Supabase challenge progress sync notice:', error);
+    }
   };
 
-  // Interactions: Challenge Join/Leave (Day 1 on start, Day 0 on leave)
+  // Interactions: Challenge Join/Leave (Starts at Day 0/target until first post, Day 0 on leave)
   const handleToggleJoinChallenge = async (challengeId: string) => {
     let starting = false;
+    let updatedParticipantsCount = 0;
 
     setChallenges((prev) => {
       const updated = prev.map((ch) => {
         if (ch.id === challengeId) {
           starting = !ch.joined;
           if (starting) {
-            showToast(`🔥 Started challenge: ${ch.title}! Marked as Day 1.`);
+            updatedParticipantsCount = (ch.participantsCount || 0) + 1;
+            showToast(`Joined ${ch.title}! Post a proof to start Day 1.`);
             return {
               ...ch,
               joined: true,
-              current: 1, // Whenever someone starts a challenge, mark it as Day 1
+              current: 0,
+              participantsCount: updatedParticipantsCount,
               status: 'active' as const,
             };
           } else {
+            updatedParticipantsCount = Math.max(0, (ch.participantsCount || 1) - 1);
             showToast(`Left challenge: ${ch.title}. Reset to Day 0.`);
             return {
               ...ch,
               joined: false,
-              current: 0, // If he/she leaves the challenge, reset to Day 0
+              current: 0,
+              participantsCount: updatedParticipantsCount,
               status: 'explore' as const,
             };
           }
@@ -2858,7 +2993,10 @@ export default function App() {
         return {
           ...prev,
           joined: isStarting,
-          current: isStarting ? 1 : 0,
+          current: 0,
+          participantsCount: isStarting
+            ? (prev.participantsCount || 0) + 1
+            : Math.max(0, (prev.participantsCount || 1) - 1),
           status: isStarting ? 'active' : 'explore',
         };
       }
@@ -2871,52 +3009,59 @@ export default function App() {
         return {
           ...prev,
           joined: isStarting,
-          current: isStarting ? 1 : 0,
+          current: 0,
+          participantsCount: isStarting
+            ? (prev.participantsCount || 0) + 1
+            : Math.max(0, (prev.participantsCount || 1) - 1),
           status: isStarting ? 'active' : 'explore',
         };
       }
       return prev;
     });
 
-    // Sync challenge participation to Supabase
+    // Sync challenge participation & participant count to Supabase
     try {
-      let activeUserId: string | undefined = currentUser?.id;
-      if (!isValidUUID(activeUserId)) {
-        const { data: sessionData } = await supabase.auth.getSession();
-        activeUserId = sessionData?.session?.user?.id;
-      }
+      const activeUserId = await getActiveAuthUserId();
+      const safeChallengeId = toDeterministicUUID(challengeId);
 
-      if (isValidUUID(activeUserId) && isValidUUID(challengeId)) {
-        await syncProfileToSupabase({ ...currentUser, id: activeUserId! });
+      if (activeUserId && isValidUUID(safeChallengeId)) {
+        await syncProfileToSupabase({ ...currentUser, id: activeUserId });
 
         if (starting) {
-          await supabase.from('challenge_participants').upsert({
-            challenge_id: challengeId,
+          const { error: partErr } = await supabase.from('challenge_participants').upsert({
+            challenge_id: safeChallengeId,
             user_id: activeUserId,
-            current_progress: 1,
-          });
+            current_progress: 0,
+          }, { onConflict: 'challenge_id,user_id' });
+          if (partErr) reportCloudSyncError('challenge join', partErr);
         } else {
-          await supabase.from('challenge_participants').delete().match({
-            challenge_id: challengeId,
+          const { error: partErr } = await supabase.from('challenge_participants').delete().match({
+            challenge_id: safeChallengeId,
             user_id: activeUserId,
           });
+          if (partErr) reportCloudSyncError('challenge leave', partErr);
         }
+
+        await supabase
+          .from('challenges')
+          .update({ participants_count: updatedParticipantsCount })
+          .eq('id', safeChallengeId);
       }
     } catch (err) {
       console.warn('Supabase challenge participant sync notice:', err);
     }
   };
 
-  // Interactions: Restart Challenge (Resets to Day 1)
-  const handleRestartChallenge = (challengeId: string) => {
+  // Interactions: Restart Challenge (Resets to Day 0 until posted)
+  const handleRestartChallenge = async (challengeId: string) => {
     setChallenges((prev) => {
       const updated = prev.map((ch) => {
         if (ch.id === challengeId) {
-          showToast(`🎉 Challenge restarted: ${ch.title}! Ready for Day 1.`);
+          showToast(`Challenge restarted: ${ch.title}! Post a proof to begin Day 1.`);
           return {
             ...ch,
             joined: true,
-            current: 1,
+            current: 0,
             status: 'active' as const,
           };
         }
@@ -2928,18 +3073,33 @@ export default function App() {
 
     setSelectedChallenge((prev) =>
       prev && prev.id === challengeId
-        ? { ...prev, joined: true, current: 1, status: 'active' }
+        ? { ...prev, joined: true, current: 0, status: 'active' }
         : prev
     );
 
     setActiveChallenge((prev) =>
       prev && prev.id === challengeId
-        ? { ...prev, joined: true, current: 1, status: 'active' }
+        ? { ...prev, joined: true, current: 0, status: 'active' }
         : prev
     );
+
+    try {
+      const activeUserId = await getActiveAuthUserId();
+      const safeChallengeId = toDeterministicUUID(challengeId);
+      if (activeUserId && isValidUUID(safeChallengeId)) {
+        const { error } = await supabase.from('challenge_participants').upsert({
+          challenge_id: safeChallengeId,
+          user_id: activeUserId,
+          current_progress: 0,
+        }, { onConflict: 'challenge_id,user_id' });
+        if (error) reportCloudSyncError('challenge restart', error);
+      }
+    } catch (error) {
+      console.warn('Supabase challenge restart sync notice:', error);
+    }
   };
 
-  // Create Challenge handler
+  // Create Challenge handler (starts at 0/target until creator actually posts)
   const handleCreateChallenge = async (data: Partial<Challenge>) => {
     const challengeId = getSafeUUID();
     const newChallenge: Challenge = {
@@ -2949,7 +3109,7 @@ export default function App() {
       whatYouPerform: data.whatYouPerform || data.description || '',
       difficulty: data.difficulty || 'Medium',
       createdAt: new Date().toISOString(),
-      current: 1, // When started/created, mark as Day 1
+      current: 0,
       target: data.target || 30,
       unit: data.unit || 'days',
       category: data.category || 'habits',
@@ -2973,7 +3133,7 @@ export default function App() {
     const nextChallenges = [newChallenge, ...challenges];
     setChallenges(nextChallenges);
     StorageService.saveChallenges(nextChallenges);
-    showToast(`🎉 New Challenge created: "${newChallenge.title}" (Day 1)`);
+    showToast(`🎉 New Challenge created: "${newChallenge.title}"`);
 
     // Persist to Supabase
     try {
@@ -3005,15 +3165,15 @@ export default function App() {
           return;
         }
 
-        const { error: participantError } = await supabase.from('challenge_participants').insert({
+        const { error: participantError } = await supabase.from('challenge_participants').upsert({
           challenge_id: challengeId,
           user_id: activeUserId,
-          current_progress: 1,
-        });
+          current_progress: 0,
+        }, { onConflict: 'challenge_id,user_id' });
         reportCloudSyncError('challenge enrollment', participantError);
 
         // Immediately refresh state
-        fetchSupabaseData(activeUserId);
+        fetchSupabaseData(activeUserId, true);
       }
     } catch (err) {
       console.warn('Supabase challenge creation notice:', err);
@@ -3022,16 +3182,25 @@ export default function App() {
 
   // Interactions: Add Cohort Proof & update challenge progress
   const handleAddCohortProof = async (challengeId: string, proof: CohortProof) => {
+    const targetChallenge = challenges.find((item) => item.id === challengeId);
+    const nextProgress = Math.min((targetChallenge?.current || 0) + 1, targetChallenge?.target || proof.dayNumber);
+
     const persistProof = async (photoUrl: string | undefined): Promise<boolean> => {
-      const savedProof = { ...proof, photoUrl };
+      const savedProof: CohortProof = { ...proof, photoUrl, verified: Boolean(proof.verified) };
       const addProofToChallenge = (challenge: Challenge): Challenge => ({
         ...challenge,
+        joined: true,
         squadProofs: [savedProof, ...(challenge.squadProofs || []).filter((item) => item.id !== savedProof.id)],
-        current: Math.min((challenge.current || 0) + 1, challenge.target),
+        current: nextProgress,
+        status: nextProgress >= challenge.target ? 'completed' : 'active',
       });
-      setChallenges((prev) => prev.map((challenge) =>
-        challenge.id === challengeId ? addProofToChallenge(challenge) : challenge
-      ));
+      setChallenges((prev) => {
+        const updated = prev.map((challenge) =>
+          challenge.id === challengeId ? addProofToChallenge(challenge) : challenge
+        );
+        StorageService.saveChallenges(updated);
+        return updated;
+      });
       setActiveChallenge((prev) =>
         prev?.id === challengeId ? addProofToChallenge(prev) : prev
       );
@@ -3041,15 +3210,19 @@ export default function App() {
 
       try {
         const userId = await getActiveAuthUserId();
-        if (!userId || !isValidUUID(challengeId)) return true;
+        const safeChallengeId = toDeterministicUUID(challengeId);
+        if (!userId || !isValidUUID(safeChallengeId)) return true;
 
+        await syncProfileToSupabase({ ...currentUser, id: userId });
+
+        const remotePhotoUrl = photoUrl?.startsWith('data:') ? null : photoUrl || null;
         const { error } = await supabase.from('cohort_proofs').upsert({
           id: proof.id,
-          challenge_id: challengeId,
+          challenge_id: safeChallengeId,
           author_id: userId,
           day_number: proof.dayNumber,
           note: proof.note,
-          photo_url: photoUrl?.startsWith('data:') ? null : photoUrl || null,
+          photo_url: remotePhotoUrl,
           likes_count: proof.likesCount || 0,
           verified: Boolean(proof.verified),
         });
@@ -3058,12 +3231,26 @@ export default function App() {
           return false;
         }
 
-        const challenge = challenges.find((item) => item.id === challengeId);
+        // Silent backing row in posts so any user can give/save credits via post_credits RLS
+        await supabase.from('posts').upsert({
+          id: proof.id,
+          author_id: userId,
+          content: proof.note || `Day ${proof.dayNumber} check-in`,
+          purpose: 'Progress',
+          media_urls: remotePhotoUrl ? [remotePhotoUrl] : [],
+          media_type: remotePhotoUrl ? 'image' : 'none',
+          challenge_id: safeChallengeId,
+          feed_visible: false,
+          credits_count: proof.likesCount || 0,
+          likes_count: proof.likesCount || 0,
+          comments_count: 0,
+        }, { onConflict: 'id', ignoreDuplicates: true });
+
         const { error: participantError } = await supabase.from('challenge_participants').upsert({
-          challenge_id: challengeId,
+          challenge_id: safeChallengeId,
           user_id: userId,
-          current_progress: Math.min((challenge?.current || 0) + 1, challenge?.target || proof.dayNumber),
-        });
+          current_progress: nextProgress,
+        }, { onConflict: 'challenge_id,user_id' });
         if (participantError) {
           reportCloudSyncError('challenge progress', participantError);
           return false;
@@ -3090,7 +3277,7 @@ export default function App() {
     if (photoUploadFailed) {
       showToast('Proof saved, but its photo could not be uploaded.');
     } else if (cloudSaved) {
-      showToast(`Photo proof recorded for ${proof.author.name}.`);
+      showToast('Photo submitted! Awaiting moderator verification before appearing in challenge feed.');
     } else {
       showToast('Proof saved on this device, but cloud sync failed.');
     }
@@ -3103,11 +3290,12 @@ export default function App() {
         showToast('Sign in to verify challenge proofs.');
         return false;
       }
+      const safeChallengeId = toDeterministicUUID(challengeId);
       const { error } = await supabase
         .from('cohort_proofs')
         .update({ verified: true })
         .eq('id', proofId)
-        .eq('challenge_id', challengeId);
+        .eq('challenge_id', safeChallengeId);
       if (error) {
         reportCloudSyncError('proof verification', error);
         return false;
@@ -3119,15 +3307,123 @@ export default function App() {
           proof.id === proofId ? { ...proof, verified: true } : proof
         ),
       });
-      setChallenges((prev) => prev.map((challenge) =>
-        challenge.id === challengeId ? markVerified(challenge) : challenge
-      ));
+      setChallenges((prev) => {
+        const updated = prev.map((challenge) =>
+          challenge.id === challengeId ? markVerified(challenge) : challenge
+        );
+        StorageService.saveChallenges(updated);
+        return updated;
+      });
       setActiveChallenge((prev) => prev?.id === challengeId ? markVerified(prev) : prev);
+      setSelectedChallenge((prev) => prev?.id === challengeId ? markVerified(prev) : prev);
+      showToast('Photo verified and published to challenge feed!');
       return true;
     } catch (error) {
       console.error('Supabase proof verification failed:', error);
       showToast('Proof verification failed. Please try again.');
       return false;
+    }
+  };
+
+  // Interactions: Credit / Uncredit a Cohort Proof (persists locally and via Supabase post_credits)
+  const handleToggleLikeProof = async (challengeId: string, proofId: string) => {
+    const targetChallenge = challenges.find((c) => c.id === challengeId);
+    const targetProof = targetChallenge?.squadProofs?.find((p) => p.id === proofId);
+    if (!targetProof) return;
+
+    const nextIsLiked = !targetProof.isLiked;
+    const nextLikesCount = Math.max(0, (targetProof.likesCount || 0) + (nextIsLiked ? 1 : -1));
+
+    const applyCreditUpdate = (ch: Challenge): Challenge => ({
+      ...ch,
+      squadProofs: (ch.squadProofs || []).map((p) =>
+        p.id === proofId
+          ? { ...p, isLiked: nextIsLiked, likesCount: nextLikesCount }
+          : p
+      ),
+    });
+
+    setChallenges((prev) => {
+      const updated = prev.map((c) => (c.id === challengeId ? applyCreditUpdate(c) : c));
+      StorageService.saveChallenges(updated);
+      return updated;
+    });
+    setActiveChallenge((prev) => (prev?.id === challengeId ? applyCreditUpdate(prev) : prev));
+    setSelectedChallenge((prev) => (prev?.id === challengeId ? applyCreditUpdate(prev) : prev));
+
+    const activeUid = currentUser?.id;
+    const existingCredits = StorageService.getUserCredits(activeUid);
+    const nextCreditsList = nextIsLiked
+      ? Array.from(new Set([...existingCredits, proofId]))
+      : existingCredits.filter((id) => id !== proofId);
+    StorageService.saveUserCredits(nextCreditsList, activeUid);
+    StorageService.saveCommunityVote(proofId, nextIsLiked ? 'credit' : null, activeUid);
+
+    try {
+      const activeUserId = await getActiveAuthUserId();
+      if (!activeUserId || !isValidUUID(proofId)) return;
+
+      await syncProfileToSupabase({ ...currentUser, id: activeUserId });
+
+      // Ensure backing posts row exists if current user is the proof author
+      const { data: existingPostRow } = await supabase
+        .from('posts')
+        .select('id')
+        .eq('id', proofId)
+        .maybeSingle();
+
+      if (!existingPostRow && targetProof.author?.id === activeUserId) {
+        const safeChallengeId = toDeterministicUUID(challengeId);
+        await supabase.from('posts').upsert({
+          id: proofId,
+          author_id: activeUserId,
+          content: targetProof.note || `Day ${targetProof.dayNumber} check-in`,
+          purpose: 'Progress',
+          media_urls: targetProof.photoUrl && !targetProof.photoUrl.startsWith('data:') ? [targetProof.photoUrl] : [],
+          media_type: targetProof.photoUrl ? 'image' : 'none',
+          challenge_id: isValidUUID(safeChallengeId) ? safeChallengeId : null,
+          feed_visible: false,
+          credits_count: nextLikesCount,
+          likes_count: nextLikesCount,
+          comments_count: 0,
+        }, { onConflict: 'id', ignoreDuplicates: true });
+      }
+
+      const voteResult = nextIsLiked
+        ? await supabase.from('post_credits').upsert({
+            post_id: proofId,
+            user_id: activeUserId,
+            vote_type: 'credit',
+          }, { onConflict: 'post_id,user_id' })
+        : await supabase.from('post_credits').delete().match({
+            post_id: proofId,
+            user_id: activeUserId,
+          });
+
+      if (voteResult.error) {
+        console.warn('Proof post_credits sync warning:', voteResult.error.message);
+      }
+
+      const legacyResult = nextIsLiked
+        ? await supabase.from('post_likes').upsert({
+            post_id: proofId,
+            user_id: activeUserId,
+          }, { onConflict: 'post_id,user_id', ignoreDuplicates: true })
+        : await supabase.from('post_likes').delete().match({
+            post_id: proofId,
+            user_id: activeUserId,
+          });
+      if (legacyResult.error) {
+        console.warn('Proof post_likes sync warning:', legacyResult.error.message);
+      }
+
+      // Also update cohort_proofs.likes_count if current user is moderator or proof author
+      await supabase
+        .from('cohort_proofs')
+        .update({ likes_count: nextLikesCount })
+        .eq('id', proofId);
+    } catch (error) {
+      console.warn('Supabase proof credit sync notice:', error);
     }
   };
 
@@ -3981,11 +4277,42 @@ export default function App() {
             return;
           }
         }
+
+        // If this post was linked to a challenge, also delete any linked proof and reduce streak
+        if (targetChallenge && isAuthor) {
+          const safeChallengeId = toDeterministicUUID(targetChallenge.id);
+          await supabase.from('cohort_proofs').delete().eq('id', safeId);
+          const nextStreak = Math.max(0, (targetChallenge.current || 0) - 1);
+          await supabase.from('challenge_participants').upsert({
+            challenge_id: safeChallengeId,
+            user_id: activeUserId,
+            current_progress: nextStreak,
+          }, { onConflict: 'challenge_id,user_id' });
+        }
       }
     } catch (error) {
       console.error('Supabase post deletion failed:', error);
       showToast('Post deletion failed. Please try again.');
       return;
+    }
+
+    if (targetChallenge && isAuthor) {
+      const reduceChallengeStreak = (c: Challenge): Challenge => {
+        const nextCurrent = Math.max(0, (c.current || 0) - 1);
+        return {
+          ...c,
+          current: nextCurrent,
+          status: c.joined && nextCurrent < c.target ? 'active' : c.status,
+          squadProofs: (c.squadProofs || []).filter((pr) => !isMatch(pr.id)),
+        };
+      };
+      setChallenges((prev) => {
+        const updated = prev.map((c) => (c.id === targetChallenge.id ? reduceChallengeStreak(c) : c));
+        StorageService.saveChallenges(updated);
+        return updated;
+      });
+      setActiveChallenge((prev) => (prev?.id === targetChallenge.id ? reduceChallengeStreak(prev) : prev));
+      setSelectedChallenge((prev) => (prev?.id === targetChallenge.id ? reduceChallengeStreak(prev) : prev));
     }
 
     setPosts((prev) => {
@@ -4004,7 +4331,7 @@ export default function App() {
     setSelectedPostForMenu((prev) => (prev && isMatch(prev.id) ? null : prev));
     setSelectedPostForShare((prev) => (prev && isMatch(prev.id) ? null : prev));
 
-    showToast('Post deleted');
+    showToast(targetChallenge && isAuthor ? 'Challenge post deleted · Streak reduced' : 'Post deleted');
 
   };
 
@@ -4171,74 +4498,27 @@ export default function App() {
     }
   };
 
-  const handleCheckInWithProof = (
+  const handleCheckInWithProof = async (
     challengeId: string,
     note: string,
     photoUrl?: string,
-    addAsDailyProof: boolean = true
+    _addAsDailyProof: boolean = true
   ) => {
-    handleIncrementChallenge(challengeId);
     const targetCh = challenges.find((c) => c.id === challengeId);
-    const dayNumber = (targetCh?.current || 0) + 1;
-
-    // Setting check: cross-post to normal feed or keep in challenge cohort only
-    const shouldCrossPost = StorageService.getCrossPostToFeed();
-
-    if (addAsDailyProof && shouldCrossPost) {
-      const proofPostId = getSafeUUID();
-      const contentText = note.trim()
-        ? `${note.trim()}\n\n[Verified Daily Proof • Day ${dayNumber} of ${targetCh?.title || 'Challenge'}]`
-        : `Completed Day ${dayNumber} check-in for ${targetCh?.title || 'Challenge'}! 🎯`;
-
-      const proofPost: Post = {
-        id: proofPostId,
-        author: currentUser,
-        timestamp: 'Just now',
-        purpose: 'Progress',
-        content: contentText,
-        mediaUrls: photoUrl ? [photoUrl] : undefined,
-        imageUrl: photoUrl,
-        mediaType: photoUrl ? 'image' : undefined,
-        likesCount: 0,
-        commentsCount: 0,
-        isLiked: false,
-        isSaved: false,
-        isDailyProof: true,
-        proofDay: dayNumber,
-        challengeId: targetCh?.id,
-        challengeTitle: targetCh?.title,
-      };
-
-      setPosts((prev) => {
-        const next = [proofPost, ...prev];
-        StorageService.savePosts(next);
-        return next;
-      });
-
-      // Also sync to Supabase if authenticated
-      getActiveAuthUserId().then(async (safeAuthorId) => {
-        if (safeAuthorId) {
-          try {
-            await syncProfileToSupabase({ ...currentUser, id: safeAuthorId });
-            await supabase.from('posts').insert({
-              id: toDeterministicUUID(proofPostId),
-              author_id: safeAuthorId,
-              content: contentText,
-              purpose: 'Progress',
-              media_urls: photoUrl ? [photoUrl] : [],
-              media_type: photoUrl ? 'image' : 'none',
-              challenge_id: isValidUUID(challengeId) ? challengeId : null,
-              likes_count: 0,
-              comments_count: 0,
-            });
-          } catch (err) {
-            console.warn('Supabase daily proof insert error:', err);
-          }
-        }
-      }).catch(() => {});
-    }
-
-    showToast(`Day ${dayNumber} proof logged${photoUrl ? ' with photo' : ''}!`);
+    const dayNumber = Math.min((targetCh?.current || 0) + 1, targetCh?.target || 30);
+    const newProof: CohortProof = {
+      id: getSafeUUID(),
+      challengeId,
+      author: currentUser,
+      dayNumber,
+      note: note.trim() || `Day ${dayNumber} check-in`,
+      photoUrl,
+      timestamp: 'Just now',
+      likesCount: 0,
+      isLiked: false,
+      verified: false,
+    };
+    await handleAddCohortProof(challengeId, newProof);
   };
 
   const handleOpenChallengeDetail = (challenge: Challenge) => {
@@ -4452,7 +4732,7 @@ export default function App() {
   const handleDeleteCohortProof = async (challengeId: string, proofId: string): Promise<boolean> => {
     const challenge = challenges.find((item) => item.id === challengeId);
     const proof = challenge?.squadProofs?.find((item) => item.id === proofId);
-    const isAuthor = Boolean(proof && (
+    const isProofAuthor = Boolean(proof && (
       (proof.author.id && currentUser.id && proof.author.id === currentUser.id) ||
       (proof.author.username && currentUser.username &&
         proof.author.username.toLowerCase() === currentUser.username.toLowerCase())
@@ -4462,19 +4742,24 @@ export default function App() {
       (challenge.creator?.username && currentUser.username &&
         challenge.creator.username.toLowerCase() === currentUser.username.toLowerCase())
     ));
-    if (!isAuthor && !isModerator) {
+    if (!isProofAuthor && !isModerator) {
       showToast('Only the proof author or challenge moderator can delete this proof.');
       return false;
     }
 
+    const safeChallengeId = toDeterministicUUID(challengeId);
+    const nextProgressForUser = isProofAuthor && challenge
+      ? Math.max(0, (challenge.current || 0) - 1)
+      : Math.max(0, (proof?.dayNumber || 1) - 1);
+
     try {
       const activeUserId = await getActiveAuthUserId();
-      if (activeUserId && isValidUUID(proofId) && isValidUUID(challengeId)) {
+      if (activeUserId && isValidUUID(proofId) && isValidUUID(safeChallengeId)) {
         const { data: existingProof, error: lookupError } = await supabase
           .from('cohort_proofs')
           .select('id')
           .eq('id', proofId)
-          .eq('challenge_id', challengeId)
+          .eq('challenge_id', safeChallengeId)
           .maybeSingle();
         if (lookupError) {
           console.error('Supabase challenge proof deletion lookup failed:', lookupError);
@@ -4486,7 +4771,7 @@ export default function App() {
             .from('cohort_proofs')
             .delete()
             .eq('id', proofId)
-            .eq('challenge_id', challengeId)
+            .eq('challenge_id', safeChallengeId)
             .select('id')
             .maybeSingle();
           if (error) {
@@ -4499,6 +4784,21 @@ export default function App() {
             return false;
           }
         }
+
+        // Remove any linked backing/cross-post row in posts
+        await supabase.from('posts').delete().eq('id', proofId);
+
+        // Reduce participant progress/streak in Supabase
+        const targetParticipantId = isProofAuthor
+          ? activeUserId
+          : (proof?.author?.id && isValidUUID(proof.author.id) ? proof.author.id : undefined);
+        if (targetParticipantId) {
+          await supabase.from('challenge_participants').upsert({
+            challenge_id: safeChallengeId,
+            user_id: targetParticipantId,
+            current_progress: nextProgressForUser,
+          }, { onConflict: 'challenge_id,user_id' });
+        }
       }
     } catch (error) {
       console.error('Challenge proof deletion failed:', error);
@@ -4506,16 +4806,32 @@ export default function App() {
       return false;
     }
 
-    setChallenges((prev) =>
-      prev.map((c) => {
-        if (c.id !== challengeId) return c;
-        return {
-          ...c,
-          squadProofs: (c.squadProofs || []).filter((p) => p.id !== proofId),
-        };
-      })
-    );
-    showToast('Challenge proof deleted');
+    const removeProofAndReduceStreak = (c: Challenge): Challenge => {
+      const nextCurrent = isProofAuthor ? Math.max(0, (c.current || 0) - 1) : c.current;
+      return {
+        ...c,
+        current: nextCurrent,
+        status: isProofAuthor && c.joined && nextCurrent < c.target ? 'active' : c.status,
+        squadProofs: (c.squadProofs || []).filter((p) => p.id !== proofId),
+      };
+    };
+
+    setChallenges((prev) => {
+      const updated = prev.map((c) => (c.id === challengeId ? removeProofAndReduceStreak(c) : c));
+      StorageService.saveChallenges(updated);
+      return updated;
+    });
+    setActiveChallenge((prev) => (prev?.id === challengeId ? removeProofAndReduceStreak(prev) : prev));
+    setSelectedChallenge((prev) => (prev?.id === challengeId ? removeProofAndReduceStreak(prev) : prev));
+
+    // Also remove from Home posts if cross-posted
+    setPosts((prev) => {
+      const filtered = prev.filter((p) => p.id !== proofId);
+      StorageService.savePosts(filtered);
+      return filtered;
+    });
+
+    showToast(isProofAuthor ? 'Challenge proof deleted · Streak reduced' : 'Challenge proof rejected & removed');
     return true;
   };
 
@@ -5003,6 +5319,7 @@ export default function App() {
             onAddProof={handleAddCohortProof}
             onVerifyProof={handleVerifyCohortProof}
             onDeleteProof={handleDeleteCohortProof}
+            onToggleLikeProof={handleToggleLikeProof}
           />
         );
       }
@@ -5088,6 +5405,7 @@ export default function App() {
             onToggleJoin={handleToggleJoinChallenge}
             onRestartChallenge={handleRestartChallenge}
             onDeleteChallenge={handleDeleteChallenge}
+            onToggleLikeProof={handleToggleLikeProof}
             isInTodoList={toDoList.some((t) => t.challengeId === targetCh.id)}
           />
         );

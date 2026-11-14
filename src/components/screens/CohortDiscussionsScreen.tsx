@@ -19,7 +19,9 @@ import {
   Bell,
   BellOff,
   Trash2,
-  Crop
+  Crop,
+  Clock,
+  ShieldCheck,
 } from 'lucide-react';
 import { Author, Challenge, CohortProof } from '../../types';
 import { getSafeUUID } from '../../lib/supabase';
@@ -40,6 +42,7 @@ interface CohortDiscussionsScreenProps {
   onAddProof?: (challengeId: string, proof: CohortProof) => void;
   onVerifyProof?: (challengeId: string, proofId: string) => Promise<boolean>;
   onDeleteProof?: (challengeId: string, proofId: string) => Promise<boolean>;
+  onToggleLikeProof?: (challengeId: string, proofId: string) => Promise<void> | void;
 }
 
 const DEFAULT_COHORT_PROOFS: Record<string, CohortProof[]> = {
@@ -59,6 +62,7 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
   onAddProof,
   onVerifyProof,
   onDeleteProof,
+  onToggleLikeProof,
 }) => {
   const [selectedCohort, setSelectedCohort] = useState<Challenge>(challenge);
   const [viewMode, setViewMode] = useState<'list' | 'detail'>(initialViewMode);
@@ -86,8 +90,10 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
   // Lightbox modal for viewing anyone's photo proof full size
   const [activeLightboxProof, setActiveLightboxProof] = useState<CohortProof | null>(null);
 
-  // Sorting/filtering: 'squad' vs 'all' (if solo challenge, only 'all')
-  const [feedFilter, setFeedFilter] = useState<'squad' | 'all'>('squad');
+  // Sorting/filtering: 'squad' vs 'all' vs 'verify' (Photo Verify for moderators)
+  const [feedFilter, setFeedFilter] = useState<'squad' | 'all' | 'verify'>(
+    challenge.type === 'solo' ? 'all' : 'squad'
+  );
 
   // Proofs state: initialized from challenge or default proofs
   const [proofs, setProofs] = useState<CohortProof[]>(() => {
@@ -106,9 +112,10 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
   useEffect(() => {
     if (challenge) {
       setSelectedCohort(challenge);
-      if (challenge.type === 'solo') {
-        setFeedFilter('all');
-      }
+      setFeedFilter((prev) => {
+        if (prev === 'verify') return prev;
+        return challenge.type === 'solo' ? 'all' : prev;
+      });
       if (challenge.squadProofs && challenge.squadProofs.length > 0) {
         setProofs(challenge.squadProofs);
       } else {
@@ -144,14 +151,15 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
         return {
           ...p,
           isLiked: !p.isLiked,
-          likesCount: p.isLiked ? p.likesCount - 1 : p.likesCount + 1,
+          likesCount: Math.max(0, p.isLiked ? p.likesCount - 1 : p.likesCount + 1),
         };
       }
       return p;
     }));
+    onToggleLikeProof?.(selectedCohort.id, id);
   };
 
-  // Handle proof submission
+  // Handle proof submission (unverified until moderator approves)
   const handleSubmitProof = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProofPhoto) return;
@@ -164,8 +172,8 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
       note: proofNote.trim(),
       photoUrl: selectedProofPhoto,
       timestamp: 'Just now',
-      likesCount: 1,
-      isLiked: true,
+      likesCount: 0,
+      isLiked: false,
       verified: false,
     };
 
@@ -215,27 +223,36 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
     setProofs(prev => prev.map(p => p.id === proofId ? { ...p, verified: true } : p));
   };
 
-  // Filter proofs according to user selection:
-  // Moderators verify challenge photos; only verified photos are shown in all cohort posts
-  const filteredProofs = proofs.filter((p) => {
-    if (selectedCohort.type === 'solo') {
-      if (p.photoUrl && p.verified === false && !isModerator && p.author.username !== currentUser.username && p.author.id !== currentUser.id) {
-        return false;
-      }
-      return true;
+  const handleRejectProof = async (proofId: string) => {
+    if (!isModerator) return;
+    const deleted = onDeleteProof
+      ? await onDeleteProof(selectedCohort.id, proofId)
+      : true;
+    if (deleted) {
+      setProofs(prev => prev.filter(p => p.id !== proofId));
     }
+  };
+
+  // Pending proofs awaiting moderator photo verification
+  const pendingVerifyProofs = proofs.filter((p) => p.verified !== true);
+  const myPendingProofs = pendingVerifyProofs.filter(
+    (p) =>
+      (p.author.id && currentUser.id && p.author.id === currentUser.id) ||
+      (p.author.username && currentUser.username && p.author.username.toLowerCase() === currentUser.username.toLowerCase())
+  );
+
+  // Strict challenge feed gating: ONLY verified photos appear in the challenge feed
+  const filteredProofs = proofs.filter((p) => {
+    if (p.verified !== true) return false;
+    if (selectedCohort.type === 'solo') return true;
     if (feedFilter === 'squad') {
       return squadMemberUsernames.has(p.author.username) || p.author.id === currentUser.id;
-    }
-    // 'all': only show photo proofs that are verified (or viewer is moderator / author is current user)
-    if (p.photoUrl && p.verified === false && !isModerator && p.author.username !== currentUser.username && p.author.id !== currentUser.id) {
-      return false;
     }
     return true;
   });
 
   const isSquadChallenge = selectedCohort.type === 'squad';
-  const effectiveCurrentDay = selectedCohort.current || 1;
+  const effectiveCurrentDay = selectedCohort.current || 0;
 
   // ================= VIEW MODE: ALL COHORTS LIST =================
   if (viewMode === 'list') {
@@ -267,13 +284,18 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
         <div className="space-y-3">
           {activeCohorts.map((cohort) => {
             const isSquad = cohort.type === 'squad';
+            const isModForCohort = Boolean(
+              (cohort.creator?.username && currentUser?.username && cohort.creator.username.toLowerCase() === currentUser.username.toLowerCase()) ||
+              (cohort.creator?.id && cohort.creator.id === currentUser?.id)
+            );
+            const pendingCount = (cohort.squadProofs || []).filter((p) => p.verified !== true).length;
             return (
               <div
                 key={cohort.id}
                 onClick={() => {
                   setSelectedCohort(cohort);
                   onSelectChallengeCohort?.(cohort);
-                  if (cohort.type === 'solo') setFeedFilter('all');
+                  setFeedFilter(cohort.type === 'solo' ? 'all' : 'squad');
                   changeViewMode('detail');
                 }}
                 className="p-4 rounded-3xl bg-[#080B10] hover:bg-[#101010] border border-[#20242C] hover:border-[#2166FF]/40 transition-all cursor-pointer flex items-center justify-between gap-3 group"
@@ -283,13 +305,18 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
                     {getChallengeIcon(cohort.icon)}
                   </div>
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
+                    <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                       <h3 className="text-sm font-bold text-white group-hover:text-[#3B82FF] transition-colors break-words">
                         {cohort.title}
                       </h3>
                       <span className="text-[10px] font-bold text-[#3B82FF] bg-[#2166FF]/15 px-2 py-0.5 rounded-full border border-[#2166FF]/20">
                         {isSquad ? 'Squad' : 'Solo'}
                       </span>
+                      {isModForCohort && pendingCount > 0 && (
+                        <span className="text-[10px] font-bold text-amber-400 bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/30">
+                          {pendingCount} to verify
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-[#9298A3] whitespace-pre-wrap break-words">
                       {cohort.whatYouPerform || cohort.description}
@@ -473,12 +500,11 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
         </div>
       </form>
 
-      {/* FEED FILTER TABS: SQUADS AND ALL (IF SOLO CHALLENGE ONLY ALL) */}
-      <div className="flex items-center justify-between pb-2 mb-3">
-        <div className="flex items-center gap-2">
-          {/* If squad challenge: allow toggling between Squad and All. If solo: only All */}
+      {/* FEED FILTER TABS + MODERATOR PHOTO VERIFY TAB */}
+      <div className="flex items-center justify-between pb-2 mb-3 gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5 p-1 bg-[#080B10] border border-[#20242C] rounded-2xl flex-wrap">
           {isSquadChallenge ? (
-            <div className="flex items-center p-1 bg-[#080B10] border border-[#20242C] rounded-2xl">
+            <>
               <button
                 type="button"
                 onClick={() => setFeedFilter('squad')}
@@ -504,182 +530,328 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
                 <Sparkles size={13} />
                 <span>All Cohort Posts</span>
               </button>
-            </div>
+            </>
           ) : (
-            <div className="px-3 py-1.5 rounded-xl bg-[#080B10] border border-[#20242C] text-xs font-semibold text-white flex items-center gap-1.5">
-              <Sparkles size={13} className="text-[#3B82FF]" />
+            <button
+              type="button"
+              onClick={() => setFeedFilter('all')}
+              className={`py-1.5 px-3 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                feedFilter !== 'verify'
+                  ? 'bg-[#2166FF] text-white shadow-sm'
+                  : 'text-[#9298A3] hover:text-white'
+              }`}
+            >
+              <Sparkles size={13} />
               <span>All Daily Proofs</span>
-            </div>
+            </button>
+          )}
+
+          {isModerator && (
+            <button
+              type="button"
+              onClick={() => setFeedFilter('verify')}
+              className={`py-1.5 px-3 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                feedFilter === 'verify'
+                  ? 'bg-[#2166FF] text-white shadow-sm'
+                  : 'text-[#9298A3] hover:text-white'
+              }`}
+            >
+              <ShieldCheck size={13} />
+              <span>Photo Verify</span>
+              {pendingVerifyProofs.length > 0 && (
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                  feedFilter === 'verify'
+                    ? 'bg-black/25 text-white'
+                    : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                }`}>
+                  {pendingVerifyProofs.length}
+                </span>
+              )}
+            </button>
           )}
         </div>
       </div>
 
-      {/* PROOF & DISCUSSION FEED - ALL PEOPLE'S PROOFS DISPLAYED CLEARLY */}
-      <div className="space-y-4">
-        {filteredProofs.map((proof) => (
-          <div key={proof.id} className="p-4 rounded-3xl bg-[#080B10] border border-[#20242C] space-y-3">
-            {/* Author row with Follow button */}
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <img
-                  src={proof.author.avatar}
-                  alt={proof.author.name}
-                  onClick={() => onNavigateUser?.(proof.author)}
-                  className="w-9 h-9 rounded-full object-cover border border-[#20242C] cursor-pointer hover:border-[#2166FF] transition-colors shrink-0"
-                  referrerPolicy="no-referrer"
-                />
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
+      {/* Pending notice for uploader when not in Moderator Photo Verify view */}
+      {feedFilter !== 'verify' && myPendingProofs.length > 0 && (
+        <div className="mb-4 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-between gap-2.5 text-xs text-amber-300">
+          <div className="flex items-center gap-2 min-w-0">
+            <Clock size={15} className="shrink-0 text-amber-400" />
+            <span>
+              {myPendingProofs.length} uploaded {myPendingProofs.length === 1 ? 'photo is' : 'photos are'} awaiting moderator verification before appearing in the challenge feed.
+            </span>
+          </div>
+          {isModerator && (
+            <button
+              type="button"
+              onClick={() => setFeedFilter('verify')}
+              className="px-2.5 py-1 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-[11px] font-semibold shrink-0 cursor-pointer"
+            >
+              Review
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ================= MODERATOR PHOTO VERIFY QUEUE ================= */}
+      {feedFilter === 'verify' && isModerator ? (
+        <div className="space-y-4">
+          <div className="p-3.5 rounded-2xl bg-[#080B10] border border-[#20242C] flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-[#2166FF]/15 border border-[#2166FF]/30 text-[#3B82FF] flex items-center justify-center shrink-0">
+                <ShieldCheck size={17} />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-xs font-bold text-white">Moderator Photo Verify</h2>
+                <p className="text-[11px] text-[#9298A3]">
+                  Inspect uploaded photos. Mark Good to publish to the challenge feed, or Bad to reject.
+                </p>
+              </div>
+            </div>
+            <span className="text-[11px] font-mono text-amber-400 bg-amber-500/15 border border-amber-500/25 px-2.5 py-1 rounded-full shrink-0">
+              {pendingVerifyProofs.length} pending
+            </span>
+          </div>
+
+          {pendingVerifyProofs.map((proof) => (
+            <div key={proof.id} className="p-4 rounded-3xl bg-[#080B10] border border-[#20242C] space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <img
+                    src={proof.author.avatar}
+                    alt={proof.author.name}
+                    onClick={() => onNavigateUser?.(proof.author)}
+                    className="w-9 h-9 rounded-full object-cover border border-[#20242C] cursor-pointer shrink-0"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="min-w-0">
                     <button
                       type="button"
                       onClick={() => onNavigateUser?.(proof.author)}
-                      className="text-xs font-bold text-white hover:text-[#3B82FF] transition-colors cursor-pointer truncate"
+                      className="text-xs font-bold text-white hover:text-[#3B82FF] transition-colors cursor-pointer truncate block"
                     >
                       {proof.author.name}
                     </button>
-                    {!proof.author.isCurrentUser && proof.author.username !== currentUser.username && !proof.author.isFollowing && onToggleFollow && (
-                      <button
-                        type="button"
-                        onClick={() => onToggleFollow(proof.author.id || proof.author.username)}
-                        className="px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all cursor-pointer bg-[#2166FF]/20 hover:bg-[#2166FF] text-[#3B82FF] hover:text-white border border-[#2166FF]/30"
-                      >
-                        + Follow
-                      </button>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1.5 text-[10px] text-[#9298A3] font-mono">
-                    <span>@{proof.author.username}</span>
-                    <span>·</span>
-                    <span>{proof.timestamp}</span>
+                    <div className="flex items-center gap-1.5 text-[10px] text-[#9298A3] font-mono">
+                      <span>@{proof.author.username}</span>
+                      <span>·</span>
+                      <span>{proof.timestamp}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="flex items-center gap-1.5 shrink-0">
-                <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-[#2166FF]/15 text-[#3B82FF] border border-[#2166FF]/30 whitespace-nowrap">
-                  Day {proof.dayNumber} Proof
+                <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 whitespace-nowrap">
+                  Day {proof.dayNumber} · Pending
                 </span>
-                {Boolean(
-                  isModerator ||
-                  (proof.author.username && currentUser?.username && proof.author.username.toLowerCase() === currentUser.username.toLowerCase()) ||
-                  (proof.author.id && currentUser?.id && proof.author.id === currentUser.id)
-                ) && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const deleted = onDeleteProof
-                        ? await onDeleteProof(selectedCohort.id, proof.id)
-                        : true;
-                      if (deleted) setProofs(prev => prev.filter(p => p.id !== proof.id));
-                    }}
-                    className="text-[#9298A3] hover:text-red-400 p-1 cursor-pointer transition-colors"
-                    title={isModerator && proof.author.username !== currentUser.username ? "Moderator: Delete proof from challenge" : "Delete your proof"}
-                    aria-label="Delete proof"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                )}
               </div>
-            </div>
 
-            {/* Proof Note */}
-            <p className="text-xs text-white/95 leading-relaxed">
-              {proof.note}
-            </p>
+              {proof.note && (
+                <p className="text-xs text-white/95 leading-relaxed">
+                  {proof.note}
+                </p>
+              )}
 
-            {/* Proof Photo - Prominently Displayed & Click to Expand in Lightbox */}
-            {proof.photoUrl && (
-              <div className="space-y-1.5">
-                <div 
+              {proof.photoUrl && (
+                <div
                   onClick={() => setActiveLightboxProof(proof)}
                   className="relative rounded-2xl overflow-hidden border border-[#20242C] group cursor-pointer aspect-video bg-[#101010]"
                 >
                   <img
                     src={proof.photoUrl}
-                    alt="Proof"
+                    alt="Pending verification proof"
                     className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-300"
                     referrerPolicy="no-referrer"
                   />
                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white gap-1.5 text-xs font-semibold">
                     <Maximize2 size={16} />
-                    <span>Click to View Full Photo Proof</span>
+                    <span>Inspect Full Photo</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-[#20242C]/50">
+                <button
+                  type="button"
+                  onClick={() => handleVerifyProof(proof.id)}
+                  className="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md shadow-emerald-600/20"
+                >
+                  <CheckCircle size={14} />
+                  <span>Good · Verify</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRejectProof(proof.id)}
+                  className="py-2.5 px-3 rounded-xl bg-red-600 hover:bg-red-500 active:scale-95 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md shadow-red-600/20"
+                >
+                  <X size={14} />
+                  <span>Bad · Reject</span>
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {pendingVerifyProofs.length === 0 && (
+            <div className="py-14 text-center text-[#9298A3] bg-[#080B10] rounded-3xl border border-[#20242C]">
+              <ShieldCheck size={30} className="mx-auto text-emerald-400 mb-2 opacity-75" />
+              <p className="text-xs font-semibold text-white mb-1">All caught up</p>
+              <p className="text-[11px] text-[#9298A3]">
+                No pending photos to verify right now.
+              </p>
+            </div>
+          )}
+        </div>
+      ) : (
+        /* VERIFIED CHALLENGE FEED - ONLY VERIFIED PROOFS ARE DISPLAYED */
+        <div className="space-y-4">
+          {filteredProofs.map((proof) => (
+            <div key={proof.id} className="p-4 rounded-3xl bg-[#080B10] border border-[#20242C] space-y-3">
+              {/* Author row with Follow button */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <img
+                    src={proof.author.avatar}
+                    alt={proof.author.name}
+                    onClick={() => onNavigateUser?.(proof.author)}
+                    className="w-9 h-9 rounded-full object-cover border border-[#20242C] cursor-pointer hover:border-[#2166FF] transition-colors shrink-0"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => onNavigateUser?.(proof.author)}
+                        className="text-xs font-bold text-white hover:text-[#3B82FF] transition-colors cursor-pointer truncate"
+                      >
+                        {proof.author.name}
+                      </button>
+                      {!proof.author.isCurrentUser && proof.author.username !== currentUser.username && !proof.author.isFollowing && onToggleFollow && (
+                        <button
+                          type="button"
+                          onClick={() => onToggleFollow(proof.author.id || proof.author.username)}
+                          className="px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all cursor-pointer bg-[#2166FF]/20 hover:bg-[#2166FF] text-[#3B82FF] hover:text-white border border-[#2166FF]/30"
+                        >
+                          + Follow
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[10px] text-[#9298A3] font-mono">
+                      <span>@{proof.author.username}</span>
+                      <span>·</span>
+                      <span>{proof.timestamp}</span>
+                    </div>
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between px-1 flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setActiveLightboxProof(proof)}
-                    className="text-[11px] text-[#3B82FF] hover:underline flex items-center gap-1 cursor-pointer font-medium"
-                  >
-                    <Maximize2 size={12} />
-                    <span>View Full Photo</span>
-                  </button>
-
-                  <div className="flex items-center gap-2">
-                    {proof.verified !== false ? (
-                      <span className="text-[10px] font-mono text-[#22C55E] flex items-center gap-1 bg-[#22C55E]/10 px-2 py-0.5 rounded-full border border-[#22C55E]/20">
-                        <Check size={11} />
-                        Verified by Moderator
-                      </span>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-mono text-[#F59E0B] flex items-center gap-1 bg-[#F59E0B]/10 px-2 py-0.5 rounded-full border border-[#F59E0B]/20">
-                          Pending Verification
-                        </span>
-                        {isModerator && (
-                          <button
-                            type="button"
-                            onClick={() => handleVerifyProof(proof.id)}
-                            className="text-[10px] font-semibold bg-[#2166FF] hover:bg-[#1a52cc] text-white px-2.5 py-1 rounded-full flex items-center gap-1 transition-all cursor-pointer shadow-sm"
-                          >
-                            <Check size={11} />
-                            Verify Photo
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-[#2166FF]/15 text-[#3B82FF] border border-[#2166FF]/30 whitespace-nowrap">
+                    Day {proof.dayNumber} Proof
+                  </span>
+                  {Boolean(
+                    isModerator ||
+                    (proof.author.username && currentUser?.username && proof.author.username.toLowerCase() === currentUser.username.toLowerCase()) ||
+                    (proof.author.id && currentUser?.id && proof.author.id === currentUser.id)
+                  ) && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const deleted = onDeleteProof
+                          ? await onDeleteProof(selectedCohort.id, proof.id)
+                          : true;
+                        if (deleted) setProofs(prev => prev.filter(p => p.id !== proof.id));
+                      }}
+                      className="text-[#9298A3] hover:text-red-400 p-1 cursor-pointer transition-colors"
+                      title={isModerator && proof.author.username !== currentUser.username ? "Moderator: Delete proof from challenge" : "Delete your proof"}
+                      aria-label="Delete proof"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
                 </div>
               </div>
-            )}
 
-            {/* Engagement Row */}
-            <div className="flex items-center justify-between pt-2 border-t border-[#20242C]/40 text-xs text-[#9298A3]">
-              <button
-                type="button"
-                onClick={() => handleToggleLikeProof(proof.id)}
-                className={`flex items-center gap-1.5 transition-colors cursor-pointer group ${
-                  proof.isLiked ? 'text-amber-400 font-semibold' : 'hover:text-amber-300'
-                }`}
-                aria-label={proof.isLiked ? 'Remove golden credit' : 'Give golden credit (C)'}
-                title={proof.isLiked ? 'Credited (Golden)' : 'Give golden credit (C)'}
-              >
-                <CreditIcon
-                  size={15}
-                  credited={proof.isLiked}
-                  variant="challenge"
-                  className={proof.isLiked ? 'text-amber-400' : 'text-[#9298A3] group-hover:text-amber-300'}
-                />
-                <span className="font-mono tabular-nums font-semibold text-white">{proof.likesCount}</span>
-                <span className="text-[10px] text-amber-400/90 font-medium">credits</span>
-              </button>
+              {/* Proof Note */}
+              {proof.note && (
+                <p className="text-xs text-white/95 leading-relaxed">
+                  {proof.note}
+                </p>
+              )}
 
-              <span className="text-[11px] text-[#9298A3] font-mono">
-                Day {proof.dayNumber} Check-In
-              </span>
+              {/* Proof Photo - Prominently Displayed & Click to Expand in Lightbox */}
+              {proof.photoUrl && (
+                <div className="space-y-1.5">
+                  <div 
+                    onClick={() => setActiveLightboxProof(proof)}
+                    className="relative rounded-2xl overflow-hidden border border-[#20242C] group cursor-pointer aspect-video bg-[#101010]"
+                  >
+                    <img
+                      src={proof.photoUrl}
+                      alt="Proof"
+                      className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-300"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white gap-1.5 text-xs font-semibold">
+                      <Maximize2 size={16} />
+                      <span>Click to View Full Photo Proof</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between px-1 flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setActiveLightboxProof(proof)}
+                      className="text-[11px] text-[#3B82FF] hover:underline flex items-center gap-1 cursor-pointer font-medium"
+                    >
+                      <Maximize2 size={12} />
+                      <span>View Full Photo</span>
+                    </button>
+
+                    <span className="text-[10px] font-mono text-[#22C55E] flex items-center gap-1 bg-[#22C55E]/10 px-2 py-0.5 rounded-full border border-[#22C55E]/20">
+                      <Check size={11} />
+                      Verified by Moderator
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Engagement Row */}
+              <div className="flex items-center justify-between pt-2 border-t border-[#20242C]/40 text-xs text-[#9298A3]">
+                <button
+                  type="button"
+                  onClick={() => handleToggleLikeProof(proof.id)}
+                  className={`flex items-center gap-1.5 transition-colors cursor-pointer group ${
+                    proof.isLiked ? 'text-amber-400 font-semibold' : 'hover:text-amber-300'
+                  }`}
+                  aria-label={proof.isLiked ? 'Remove golden credit' : 'Give golden credit (C)'}
+                  title={proof.isLiked ? 'Credited (Golden)' : 'Give golden credit (C)'}
+                >
+                  <CreditIcon
+                    size={15}
+                    credited={proof.isLiked}
+                    variant="challenge"
+                    className={proof.isLiked ? 'text-amber-400' : 'text-[#9298A3] group-hover:text-amber-300'}
+                  />
+                  <span className="font-mono tabular-nums font-semibold text-white">{proof.likesCount}</span>
+                  <span className="text-[10px] text-amber-400/90 font-medium">credits</span>
+                </button>
+
+                <span className="text-[11px] text-[#9298A3] font-mono">
+                  Day {proof.dayNumber} Check-In
+                </span>
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
 
-        {filteredProofs.length === 0 && (
-          <div className="py-14 text-center text-[#9298A3] bg-[#080B10] rounded-3xl border border-[#20242C]">
-            <Camera size={30} className="mx-auto text-[#2166FF] mb-2 opacity-60" />
-            <p className="text-xs font-semibold text-white mb-1">No proofs found in this view</p>
-            <p className="text-[11px] text-[#9298A3]">Attach a photo and be the first to submit today's sprint proof!</p>
-          </div>
-        )}
-      </div>
+          {filteredProofs.length === 0 && (
+            <div className="py-14 text-center text-[#9298A3] bg-[#080B10] rounded-3xl border border-[#20242C]">
+              <Camera size={30} className="mx-auto text-[#2166FF] mb-2 opacity-60" />
+              <p className="text-xs font-semibold text-white mb-1">No verified proofs yet</p>
+              <p className="text-[11px] text-[#9298A3]">
+                Uploaded photos appear here after the challenge moderator verifies them.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* FULL-SIZE PHOTO LIGHTBOX MODAL */}
       {activeLightboxProof && (

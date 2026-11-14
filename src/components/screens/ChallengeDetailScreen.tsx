@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { Author, Challenge } from '../../types';
 import { ImageCropModal } from '../modals/ImageCropModal';
+import { CreditIcon } from '../CreditIcon';
 
 interface ChallengeDetailScreenProps {
   challenge: Challenge;
@@ -37,6 +38,7 @@ interface ChallengeDetailScreenProps {
   onRestartChallenge?: (challengeId: string) => void;
   onDeleteChallenge?: (challengeId: string) => void;
   onPostAsDailyProof?: (content: string, photoUrl?: string, challengeTitle?: string) => void;
+  onToggleLikeProof?: (challengeId: string, proofId: string) => void;
   isInTodoList?: boolean;
 }
 
@@ -51,6 +53,7 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
   onRestartChallenge,
   onDeleteChallenge,
   onPostAsDailyProof,
+  onToggleLikeProof,
   isInTodoList = false,
 }) => {
   const [proofPhoto, setProofPhoto] = useState<string | null>(null);
@@ -179,7 +182,7 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
   const handleSubmitProof = (e: React.FormEvent) => {
     e.preventDefault();
     if (!proofPhoto) {
-      alert("Please take or upload a photo first to check in!");
+      setCameraError('Please take or upload a photo first to check in!');
       return;
     }
     stopCameraStream();
@@ -294,7 +297,7 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
 
           <div className="flex items-center gap-2 text-[#8A92A6] font-mono">
             <Users size={12} />
-            <span>{challenge.participantsCount || 3} joined</span>
+            <span>{challenge.participantsCount ?? (challenge.joined ? 1 : 0)} joined</span>
           </div>
         </div>
 
@@ -364,7 +367,7 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
                 className="w-full py-2.5 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] active:scale-95 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-[#2166FF]/30 transition-all cursor-pointer"
               >
                 <Flame size={15} />
-                <span>Restart Challenge Again (Day 1)</span>
+                <span>Restart Challenge Again</span>
               </button>
 
               <div className="flex items-center gap-2">
@@ -674,61 +677,106 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
         </div>
       )}
 
-      {/* Cohort Proofs Feed (if any exists for this challenge) */}
-      {challenge.squadProofs && challenge.squadProofs.length > 0 && (
-        <div className="p-4 rounded-3xl bg-[#080B10] border border-[#20242C] mb-4 space-y-3">
-          <div className="flex items-center justify-between pb-1">
-            <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-              <Camera size={13} className="text-[#3B82FF]" />
-              <span>Recent Cohort Proofs</span>
-            </h3>
-            <span className="text-[11px] text-[#8A92A6] font-mono">{challenge.squadProofs.length} proofs</span>
-          </div>
+      {/* Pending Verification Notice (uploaded photos never appear directly in feed until moderator verifies) */}
+      {(() => {
+        const allProofs = challenge.squadProofs || [];
+        const myPendingCount = allProofs.filter(
+          (p) =>
+            p.verified !== true &&
+            ((p.author.id && currentUser.id && p.author.id === currentUser.id) ||
+              (p.author.username && currentUser.username && p.author.username.toLowerCase() === currentUser.username.toLowerCase()))
+        ).length;
+        const verifiedProofs = allProofs.filter((p) => p.verified === true);
+        return (
+          <>
+            {myPendingCount > 0 && (
+              <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/25 mb-4 flex items-center gap-2.5 text-xs text-amber-300">
+                <Clock size={15} className="shrink-0 text-amber-400" />
+                <span>
+                  {myPendingCount} {myPendingCount === 1 ? 'photo is' : 'photos are'} awaiting moderator verification. Once marked good, {myPendingCount === 1 ? 'it' : 'they'} will appear in the challenge feed.
+                </span>
+              </div>
+            )}
 
-          <div className="space-y-2.5">
-            {challenge.squadProofs.slice(0, 4).map((proof) => (
-              <div key={proof.id} className="p-3 rounded-2xl bg-[#10141E] border border-[#202738] space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <img
-                      src={proof.author.avatar}
-                      alt={proof.author.name}
-                      className="w-6 h-6 rounded-full object-cover border border-[#202738]"
-                    />
-                    <span className="text-xs font-semibold text-white">{proof.author.name}</span>
-                    <span className="text-[10px] text-[#8A92A6] font-mono">Day {proof.dayNumber}</span>
-                  </div>
-
-                  {/* Feature 3: Option beside challenge post - add as daily proof */}
-                  {onPostAsDailyProof && (
-                    <button
-                      type="button"
-                      onClick={() => onPostAsDailyProof(
-                        `🎯 [Day ${proof.dayNumber} Proof for ${challenge.title}]\n\n${proof.note}`,
-                        proof.photoUrl,
-                        challenge.title
-                      )}
-                      className="px-2.5 py-1 rounded-full bg-[#2166FF]/15 hover:bg-[#2166FF] text-[#3B82FF] hover:text-white border border-[#2166FF]/30 text-[10px] font-semibold transition-all cursor-pointer flex items-center gap-1"
-                      title="Post as verified daily proof"
-                    >
-                      <Share2 size={11} />
-                      <span>Add as daily proof</span>
-                    </button>
-                  )}
+            {verifiedProofs.length > 0 && (
+              <div className="p-4 rounded-3xl bg-[#080B10] border border-[#20242C] mb-4 space-y-3">
+                <div className="flex items-center justify-between pb-1">
+                  <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <Camera size={13} className="text-[#3B82FF]" />
+                    <span>Recent Verified Proofs</span>
+                  </h3>
+                  <span className="text-[11px] text-[#8A92A6] font-mono">{verifiedProofs.length} verified</span>
                 </div>
 
-                <p className="text-xs text-white/90 leading-relaxed">{proof.note}</p>
+                <div className="space-y-2.5">
+                  {verifiedProofs.slice(0, 4).map((proof) => (
+                    <div key={proof.id} className="p-3 rounded-2xl bg-[#10141E] border border-[#202738] space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <img
+                            src={proof.author.avatar}
+                            alt={proof.author.name}
+                            className="w-6 h-6 rounded-full object-cover border border-[#202738]"
+                          />
+                          <span className="text-xs font-semibold text-white truncate">{proof.author.name}</span>
+                          <span className="text-[10px] text-[#8A92A6] font-mono shrink-0">Day {proof.dayNumber}</span>
+                        </div>
 
-                {proof.photoUrl && (
-                  <div className="rounded-xl overflow-hidden aspect-video border border-[#202738] bg-black">
-                    <img src={proof.photoUrl} alt="Cohort proof" className="w-full h-full object-cover" />
-                  </div>
-                )}
+                        <div className="flex items-center gap-2 shrink-0">
+                          {onToggleLikeProof && (
+                            <button
+                              type="button"
+                              onClick={() => onToggleLikeProof(challenge.id, proof.id)}
+                              className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border transition-all cursor-pointer ${
+                                proof.isLiked
+                                  ? 'bg-amber-500/15 border-amber-500/35 text-amber-400'
+                                  : 'bg-[#090C13] border-[#202738] text-[#9298A3] hover:text-amber-300'
+                              }`}
+                              title={proof.isLiked ? 'Credited (Golden)' : 'Give golden credit (C)'}
+                            >
+                              <CreditIcon
+                                size={12}
+                                credited={proof.isLiked}
+                                variant="challenge"
+                                className={proof.isLiked ? 'text-amber-400' : 'text-[#9298A3]'}
+                              />
+                              <span className="font-mono tabular-nums">{proof.likesCount}</span>
+                            </button>
+                          )}
+
+                          {onPostAsDailyProof && (
+                            <button
+                              type="button"
+                              onClick={() => onPostAsDailyProof(
+                                `🎯 [Day ${proof.dayNumber} Proof for ${challenge.title}]\n\n${proof.note}`,
+                                proof.photoUrl,
+                                challenge.title
+                              )}
+                              className="px-2.5 py-1 rounded-full bg-[#2166FF]/15 hover:bg-[#2166FF] text-[#3B82FF] hover:text-white border border-[#2166FF]/30 text-[10px] font-semibold transition-all cursor-pointer flex items-center gap-1"
+                              title="Post as verified daily proof"
+                            >
+                              <Share2 size={11} />
+                              <span>Add as daily proof</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {proof.note && <p className="text-xs text-white/90 leading-relaxed">{proof.note}</p>}
+
+                      {proof.photoUrl && (
+                        <div className="rounded-xl overflow-hidden aspect-video border border-[#202738] bg-black">
+                          <img src={proof.photoUrl} alt="Cohort proof" className="w-full h-full object-cover" />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+            )}
+          </>
+        );
+      })()}
 
       {/* Challenge Rules & Cohort Overview */}
       <div className="p-4 rounded-3xl bg-[#080B10] border border-[#20242C] space-y-2.5">

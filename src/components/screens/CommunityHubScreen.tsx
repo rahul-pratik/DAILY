@@ -130,29 +130,7 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
         'Celebrate shipping milestones and uphold cohort confidentiality.',
       ];
 
-  const defaultPosts: CommunityPost[] = [
-    {
-      id: `cp_welcome_${community.id}`,
-      communityId: community.id,
-      author: {
-        name: community.creator?.name || 'Community Founder',
-        username: community.creator?.username || 'founder',
-        avatar: community.creator?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-        isMod: true,
-      },
-      title: `📌 Welcome to ${community.name}! Discussion & Accountability Hub`,
-      content: 'Welcome everyone! This is our dedicated discussion space. Share insights, ask questions, exchange advice, and discuss daily progress. Keep discussions respectful and substantive.',
-      category: 'Discussion',
-      badges: ['ANNOUNCEMENT', 'PINNED'],
-      upvotes: 24,
-      userVote: 'up',
-      timestamp: '1d ago',
-      commentsCount: 0,
-      isPinned: true,
-    }
-  ];
-
-  // Merge parent communityPosts with defaults
+  // Merge parent communityPosts with local posts for this community (no fake default posts)
   const [localPosts, setLocalPosts] = useState<CommunityPost[]>([]);
 
   // Combined posts list for this specific community
@@ -160,9 +138,6 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
     const parentList = communityPosts && communityPosts.length > 0 ? communityPosts : [];
     const merged = [...localPosts, ...parentList];
     const forThisComm = merged.filter(p => !p.communityId || p.communityId === community.id);
-    if (forThisComm.length === 0) {
-      return defaultPosts;
-    }
     const seen = new Set<string>();
     return forThisComm.filter(p => {
       if (seen.has(p.id)) return false;
@@ -887,6 +862,53 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
             </div>
           );
         })}
+
+        {posts.length === 0 && (
+          <div className="p-6 rounded-3xl bg-[#080B10] border border-[#20242C] text-center space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-[#2166FF]/15 border border-[#2166FF]/30 text-[#3B82FF] mx-auto flex items-center justify-center">
+              <MessageSquare size={22} />
+            </div>
+            <div className="space-y-1 max-w-md mx-auto">
+              <h3 className="text-sm sm:text-base font-bold text-white">
+                Welcome to {community.name}
+              </h3>
+              <p className="text-xs text-[#9298A3] leading-relaxed">
+                {community.description || 'This community space is ready for your first discussion, question, insight, or milestone.'}
+              </p>
+              {community.creator?.username && (
+                <p className="text-[11px] text-[#8A92A6] font-mono pt-0.5">
+                  Created by @{community.creator.username}
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsComposerExpanded(true)}
+              className="px-4 py-2 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] text-white text-xs font-semibold transition-all cursor-pointer shadow-md shadow-[#2166FF]/20"
+            >
+              Start the First Discussion
+            </button>
+          </div>
+        )}
+
+        {posts.length > 0 && filteredPosts.length === 0 && (
+          <div className="p-6 rounded-3xl bg-[#080B10] border border-[#20242C] text-center space-y-2.5">
+            <p className="text-xs font-semibold text-white">No posts match your current filter</p>
+            <p className="text-[11px] text-[#9298A3]">
+              Try switching categories or clearing your search query.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveCategory('All');
+                setSearchQuery('');
+              }}
+              className="px-3.5 py-1.5 rounded-xl bg-[#101010] hover:bg-[#1a1f29] border border-[#20242C] text-xs font-semibold text-[#3B82FF] cursor-pointer"
+            >
+              Show All Discussions
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Community Moderator Console Modal */}

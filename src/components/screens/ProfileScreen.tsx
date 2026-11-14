@@ -138,12 +138,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       }
     });
 
+    const userPostIds = new Set(userPosts.map((p) => p.id));
+
     // Also include credits from challenge cohort proofs submitted by this user
     challenges.forEach((ch) => {
       ch.squadProofs?.forEach((proof) => {
         if (
-          (proof.author?.username && user.username && proof.author.username.toLowerCase() === user.username.toLowerCase()) ||
-          (proof.author?.id && user.id && proof.author.id === user.id)
+          !userPostIds.has(proof.id) &&
+          ((proof.author?.username && user.username && proof.author.username.toLowerCase() === user.username.toLowerCase()) ||
+          (proof.author?.id && user.id && proof.author.id === user.id))
         ) {
           golden += (proof.likesCount || 0);
         }
