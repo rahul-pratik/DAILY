@@ -23,10 +23,12 @@ import {
   Square,
   Image as ImageIcon,
   Camera,
-  Maximize2
+  Maximize2,
+  Crop
 } from 'lucide-react';
 import { Author, Community, CommunityPost, Post } from '../../types';
 import { CommunityModeratorModal } from '../modals/CommunityModeratorModal';
+import { ImageCropModal } from '../modals/ImageCropModal';
 import { CreditIcon, DiscreditIcon } from '../CreditIcon';
 import { getSafeUUID, toDeterministicUUID } from '../../lib/supabase';
 import { StorageService } from '../../services/storageService';
@@ -82,6 +84,8 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
   const [isGuidelinesOpen, setIsGuidelinesOpen] = useState(false);
   const [isMuted, setIsMuted] = useState<boolean>(() => StorageService.isCommunityMuted(community.id));
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
+  const [rawImageToCrop, setRawImageToCrop] = useState<string>('');
+  const [isCropModalOpen, setIsCropModalOpen] = useState(false);
   const [activeLightboxImage, setActiveLightboxImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -105,11 +109,13 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
     const reader = new FileReader();
     reader.onloadend = () => {
       if (typeof reader.result === 'string') {
-        setSelectedPhoto(reader.result);
+        setRawImageToCrop(reader.result);
+        setIsCropModalOpen(true);
         setIsComposerExpanded(true);
       }
     };
     reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const pendingRequestsCount = community.pendingJoinRequests?.length || 0;
@@ -550,20 +556,34 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
 
         {/* Selected Photo Thumbnail Preview */}
         {selectedPhoto && (
-          <div className="relative rounded-xl overflow-hidden border border-[#20242C] aspect-video max-h-48 bg-[#080B10]">
+          <div className="relative rounded-xl overflow-hidden border border-[#20242C] aspect-square max-h-56 mx-auto bg-[#080B10]">
             <img
               src={selectedPhoto}
               alt="Community post upload preview"
               className="w-full h-full object-cover"
             />
-            <button
-              type="button"
-              onClick={() => setSelectedPhoto(null)}
-              className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/80 hover:bg-red-500 text-white flex items-center justify-center transition-colors cursor-pointer shadow-md"
-              title="Remove photo"
-            >
-              <X size={14} />
-            </button>
+            <div className="absolute top-2 right-2 flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setRawImageToCrop(selectedPhoto);
+                  setIsCropModalOpen(true);
+                }}
+                className="px-2.5 py-1 rounded-full bg-black/80 hover:bg-[#2166FF] text-white text-[11px] font-medium flex items-center gap-1 transition-colors cursor-pointer shadow-md"
+                title="Crop photo"
+              >
+                <Crop size={12} />
+                <span>Crop</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedPhoto(null)}
+                className="w-7 h-7 rounded-full bg-black/80 hover:bg-red-500 text-white flex items-center justify-center transition-colors cursor-pointer shadow-md"
+                title="Remove photo"
+              >
+                <X size={14} />
+              </button>
+            </div>
           </div>
         )}
 
@@ -908,6 +928,21 @@ export const CommunityHubScreen: React.FC<CommunityHubScreenProps> = ({
             />
           </div>
         </div>
+      )}
+
+      {/* Photo Crop Modal */}
+      {isCropModalOpen && (
+        <ImageCropModal
+          isOpen={isCropModalOpen}
+          imageUrl={rawImageToCrop}
+          mode="square"
+          title="Crop Photo"
+          onCropComplete={(croppedDataUrl) => {
+            setSelectedPhoto(croppedDataUrl);
+            setIsCropModalOpen(false);
+          }}
+          onClose={() => setIsCropModalOpen(false)}
+        />
       )}
     </div>
   );

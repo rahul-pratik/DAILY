@@ -35,6 +35,11 @@ interface OnboardingAuthScreenProps {
   onComplete: (user: Author, selectedInterests: string[], authSession?: { provider: 'google' | 'email' | 'guest'; email?: string }) => void;
   initialUser?: Author;
   allCommunities?: any[];
+  initialStep?: OnboardingStep;
+  initialAuthMode?: 'signup' | 'login';
+  skipAutoRedirect?: boolean;
+  onStepChange?: (step: OnboardingStep) => void;
+  onCancelLogin?: () => void;
 }
 
 export type OnboardingStep = 'welcome' | 'terms' | 'auth' | 'profile';
@@ -42,14 +47,35 @@ export type OnboardingStep = 'welcome' | 'terms' | 'auth' | 'profile';
 export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
   onComplete,
   initialUser,
+  initialStep = 'welcome',
+  initialAuthMode = 'signup',
+  skipAutoRedirect = false,
+  onStepChange,
+  onCancelLogin,
 }) => {
   // 4 onboarding steps: 'welcome' -> 'terms' -> 'auth' -> 'profile'
-  const [step, setStep] = useState<OnboardingStep>('welcome');
+  const [step, setStep] = useState<OnboardingStep>(initialStep);
   const [termsTab, setTermsTab] = useState<'privacy' | 'terms'>('privacy');
   const [hasAcceptedTerms, setHasAcceptedTerms] = useState<boolean>(false);
 
   // Auth state
-  const [authMode, setAuthMode] = useState<'signup' | 'login'>('signup');
+  const [authMode, setAuthMode] = useState<'signup' | 'login'>(initialAuthMode);
+
+  const changeStep = (nextStep: OnboardingStep) => {
+    setStep(nextStep);
+    onStepChange?.(nextStep);
+  };
+
+  useEffect(() => {
+    setStep(initialStep);
+  }, [initialStep]);
+
+  useEffect(() => {
+    setAuthMode(initialAuthMode);
+    if (initialAuthMode === 'login' && initialStep === 'auth') {
+      setCameFromDirectLogin(true);
+    }
+  }, [initialAuthMode, initialStep]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -117,6 +143,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
 
   // Check if user is already authenticated via Supabase session
   useEffect(() => {
+    if (skipAutoRedirect) return;
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
         const u = session.user;
@@ -180,10 +207,10 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
         }
 
         // Advance to Step 'profile' to prompt for custom Name, Username, Avatar, Banner, and Bio for new signups
-        setStep('profile');
+        changeStep('profile');
       }
     });
-  }, []);
+  }, [skipAutoRedirect]);
 
   // Validate unique username against local reserved list and Supabase public.profiles
   const checkUsernameAvailability = async (candidate: string, currentUserId?: string) => {
@@ -615,7 +642,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
           {/* Daily Brand Logo matching the uploaded screenshot */}
           <div className="mb-6 flex items-center justify-center">
             <svg
-              className="h-12 sm:h-14 w-auto overflow-visible"
+              className="h-12 sm:h-14 w-auto overflow-visible text-white"
               viewBox="0 0 150 46"
               fill="none"
               xmlns="http://www.w3.org/2000/svg"
@@ -623,7 +650,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
               {/* Custom 'D' with inner play triangle */}
               <path
                 d="M4 4h14.5c10.8 0 17.5 7.2 17.5 19s-6.7 19-17.5 19H4V4zm7.5 6.5v25h7c6.8 0 10.5-4.8 10.5-12.5S25.3 10.5 18.5 10.5h-7z"
-                fill="#FFFFFF"
+                fill="currentColor"
               />
               {/* Vibrant blue play triangle in bowl */}
               <path
@@ -634,7 +661,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
               <text
                 x="39"
                 y="37"
-                fill="#FFFFFF"
+                fill="currentColor"
                 fontSize="41"
                 fontWeight="700"
                 fontFamily="'Plus Jakarta Sans', system-ui, -apple-system, sans-serif"
@@ -720,7 +747,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
         <div className="pb-4 sm:pb-6 w-full max-w-sm mx-auto">
           <button
             type="button"
-            onClick={() => setStep('terms')}
+            onClick={() => changeStep('terms')}
             className="w-full h-14 rounded-full bg-[#2166FF] hover:bg-[#3476FF] active:scale-[0.99] text-base font-semibold text-white flex items-center justify-center gap-2.5 shadow-lg shadow-[#2166FF]/25 transition-all cursor-pointer"
           >
             <span>Get Started</span>
@@ -736,7 +763,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
               onClick={() => {
                 setCameFromDirectLogin(true);
                 setAuthMode('login');
-                setStep('auth');
+                changeStep('auth');
               }}
               className="text-xs sm:text-sm font-semibold text-[#2166FF] hover:text-[#3B82FF] transition-colors cursor-pointer"
             >
@@ -780,15 +807,17 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
             <button
               type="button"
               onClick={() => {
-                if (step === 'terms') setStep('welcome');
+                if (step === 'terms') changeStep('welcome');
                 if (step === 'auth') {
-                  if (cameFromDirectLogin) {
-                    setStep('welcome');
+                  if (onCancelLogin && cameFromDirectLogin) {
+                    onCancelLogin();
+                  } else if (cameFromDirectLogin) {
+                    changeStep('welcome');
                   } else {
-                    setStep('terms');
+                    changeStep('terms');
                   }
                 }
-                if (step === 'profile') setStep('auth');
+                if (step === 'profile') changeStep('auth');
               }}
               className="text-xs text-[#8A92A6] hover:text-white flex items-center gap-1 cursor-pointer transition-colors font-medium"
             >
@@ -869,7 +898,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
             <div className="flex items-center gap-2.5 pt-1">
               <button
                 type="button"
-                onClick={() => setStep('welcome')}
+                onClick={() => changeStep('welcome')}
                 className="py-2.5 px-4 rounded-xl bg-[#121622] hover:bg-[#181D2B] text-xs font-semibold text-[#8A92A6] hover:text-white border border-[#202738] transition-colors cursor-pointer"
               >
                 Back
@@ -878,7 +907,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
               <button
                 type="button"
                 disabled={!hasAcceptedTerms}
-                onClick={() => setStep('auth')}
+                onClick={() => changeStep('auth')}
                 className="flex-1 py-2.5 rounded-xl bg-[#2166FF] hover:bg-[#3476FF] disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold text-white flex items-center justify-center gap-2 shadow-lg shadow-[#2166FF]/25 transition-all cursor-pointer"
               >
                 <span>Accept & Continue</span>
@@ -1005,7 +1034,7 @@ export const OnboardingAuthScreen: React.FC<OnboardingAuthScreenProps> = ({
                 onClick={handleAppleLogin}
                 className="w-full py-2.5 px-4 rounded-xl bg-[#121620] hover:bg-[#1A2030] border border-[#202738] text-xs font-semibold text-white flex items-center justify-center gap-2.5 transition-colors cursor-pointer"
               >
-                <svg className="w-4 h-4 fill-white shrink-0" viewBox="0 0 24 24">
+                <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24">
                   <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.63-.76 1.05-1.82.93-2.87-.91.04-2.02.61-2.67 1.37-.58.67-1.09 1.74-.95 2.78 1.02.08 2.06-.52 2.69-1.28z" />
                 </svg>
                 <span>Continue with Apple</span>

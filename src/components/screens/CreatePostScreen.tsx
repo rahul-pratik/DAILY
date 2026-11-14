@@ -457,7 +457,9 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
             Upload & Crop photos
           </p>
           <p className="text-[11px] text-[#9298A3]">
-            Crop to required resolution: 1:1 Square, 4:5 Portrait, or 16:9
+            {selectedDestination.type === 'general'
+              ? 'Crop to required resolution: 1:1 Square, 4:5 Portrait, or 16:9'
+              : 'Tap to upload and crop your photo before posting'}
           </p>
         </div>
       </div>
@@ -545,8 +547,8 @@ export const CreatePostScreen: React.FC<CreatePostScreenProps> = ({
         <ImageCropModal
           isOpen={isCropModalOpen}
           imageUrl={imageToCrop}
-          mode="post"
-          title="Crop Post Photo to Required Resolution"
+          mode={selectedDestination.type === 'general' ? 'post' : 'square'}
+          title={selectedDestination.type === 'general' ? 'Crop Post Photo to Required Resolution' : 'Crop Photo'}
           onCropComplete={handleCropComplete}
           onClose={() => {
             setIsCropModalOpen(false);

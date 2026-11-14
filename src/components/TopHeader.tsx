@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Search, Settings, X, Bell } from 'lucide-react';
 import { Author, ScreenType } from '../types';
 
@@ -9,6 +9,7 @@ interface TopHeaderProps {
   onOpenSettings: () => void;
   onOpenNotifications: () => void;
   onNavigateProfile: () => void;
+  onLongPressProfile?: () => void;
   onOpenAccountabilityHub?: () => void;
   onCloseCreate?: () => void;
   onSubmitPost?: () => void;
@@ -22,11 +23,44 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onOpenSettings,
   onOpenNotifications,
   onNavigateProfile,
-  onOpenAccountabilityHub,
+  onLongPressProfile,
   onCloseCreate,
   onSubmitPost,
   canSubmitPost = false,
 }) => {
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggeredRef = useRef(false);
+
+  const clearLongPress = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleProfilePointerDown = () => {
+    longPressTriggeredRef.current = false;
+    clearLongPress();
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTriggeredRef.current = true;
+      onLongPressProfile?.();
+    }, 450);
+  };
+
+  const handleProfilePointerUpOrCancel = () => {
+    clearLongPress();
+  };
+
+  const handleProfileClick = (e: React.MouseEvent) => {
+    if (longPressTriggeredRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      longPressTriggeredRef.current = false;
+      return;
+    }
+    onNavigateProfile();
+  };
+
   if (currentScreen === 'create') {
     return (
       <header className="sticky top-0 z-30 bg-black/95 backdrop-blur-md border-b border-[#20242C] px-4 py-3 flex items-center justify-between">
@@ -92,15 +126,21 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             </button>
 
             <button
-              onClick={onNavigateProfile}
-              className="w-8 h-8 rounded-full overflow-hidden border border-[#2166FF]/60 hover:border-[#2166FF] transition-all ml-1 cursor-pointer focus:outline-none relative group"
-              aria-label="Profile"
-              title="My Profile"
+              type="button"
+              onClick={handleProfileClick}
+              onPointerDown={handleProfilePointerDown}
+              onPointerUp={handleProfilePointerUpOrCancel}
+              onPointerLeave={handleProfilePointerUpOrCancel}
+              onPointerCancel={handleProfilePointerUpOrCancel}
+              onContextMenu={(e) => e.preventDefault()}
+              className="w-8 h-8 rounded-full overflow-hidden border border-[#2166FF]/60 hover:border-[#2166FF] transition-all ml-1 cursor-pointer focus:outline-none relative group select-none"
+              aria-label="Profile (Hold to switch accounts)"
+              title="Tap for Profile • Hold to Switch Accounts"
             >
               <img
                 src={currentUser.avatar}
                 alt={currentUser.name}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-cover pointer-events-none"
                 referrerPolicy="no-referrer"
               />
               <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-[#2166FF] border border-black" />

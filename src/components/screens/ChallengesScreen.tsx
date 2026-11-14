@@ -23,7 +23,10 @@ import {
   BarChart3,
   Activity,
   Sparkles,
-  Trash2
+  Trash2,
+  ChevronDown,
+  SlidersHorizontal,
+  ArrowUpDown
 } from 'lucide-react';
 import { Author, Challenge, Squad, SquadMember, SquadChatMessage } from '../../types';
 import { StorageService } from '../../services/storageService';
@@ -82,55 +85,33 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
   onToggleSquadReaction,
   onMarkSquadMessagesAsRead,
 }) => {
-  // Top 3-tab view mode: 'challenges' | 'squad_chat' | 'manage_squads'
-  const [viewMode, setViewMode] = useState<'challenges' | 'squad_chat' | 'manage_squads'>('challenges');
+  // Top 2-tab view mode: 'challenges' | 'manage_squads'
+  const [viewMode, setViewMode] = useState<'challenges' | 'manage_squads'>('challenges');
   const [activeFilter, setActiveFilter] = useState<'all' | 'squads' | 'solo' | 'joined'>('all');
   const [sortBy, setSortBy] = useState<'recent' | 'popularity' | 'difficulty'>('recent');
+  const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
+  const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string>('#All Tags');
 
+  const filterDropdownRef = React.useRef<HTMLDivElement>(null);
+  const sortDropdownRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (filterDropdownRef.current && !filterDropdownRef.current.contains(event.target as Node)) {
+        setIsFilterDropdownOpen(false);
+      }
+      if (sortDropdownRef.current && !sortDropdownRef.current.contains(event.target as Node)) {
+        setIsSortDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   // Squad Accountability Rule Modal state
   const [ruleModalChallenge, setRuleModalChallenge] = useState<Challenge | null>(null);
-
-  // Squad Chat states
-  const [selectedSquadIdForChat, setSelectedSquadIdForChat] = useState<string>(squads[0]?.id || '');
-  const [squadChatMessages, setSquadChatMessages] = useState<SquadChatMessage[]>([]);
-  const [chatInputText, setChatInputText] = useState<string>('');
-
-  React.useEffect(() => {
-    if (squads.length > 0 && (!selectedSquadIdForChat || !squads.some(s => s.id === selectedSquadIdForChat))) {
-      setSelectedSquadIdForChat(squads[0].id);
-    }
-  }, [squads, selectedSquadIdForChat]);
-
-  React.useEffect(() => {
-    if (selectedSquadIdForChat) {
-      const syncedMessages = syncedSquadChatMessages?.filter((message) => message.squadId === selectedSquadIdForChat);
-      const localMessages = StorageService.getSquadChatMessages(selectedSquadIdForChat) as SquadChatMessage[];
-      const messagesById = new Map(localMessages.map((message) => [message.id, message]));
-      (syncedMessages || []).forEach((message) => messagesById.set(message.id, message));
-      setSquadChatMessages(Array.from(messagesById.values()));
-    }
-  }, [selectedSquadIdForChat, syncedSquadChatMessages]);
-
-  const handleSendSquadMessage = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!chatInputText.trim() || !selectedSquadIdForChat || !currentUser) return;
-    const newMsg: SquadChatMessage = {
-      id: `sqmsg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      squadId: selectedSquadIdForChat,
-      author: currentUser,
-      text: chatInputText.trim(),
-      timestamp: 'Just now',
-    };
-    if (onSendSquadMessage) {
-      onSendSquadMessage(selectedSquadIdForChat, chatInputText.trim());
-    } else {
-      StorageService.addSquadChatMessage(selectedSquadIdForChat, newMsg);
-      setSquadChatMessages((prev) => [...prev, newMsg]);
-    }
-    setChatInputText('');
-  };
 
   // Deletion confirm states (Creator only)
   const [squadToDelete, setSquadToDelete] = useState<Squad | null>(null);
@@ -341,12 +322,12 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
         )}
       </div>
 
-      {/* Sleek Minimalist 3-Tab Navigator: Challenges, Squad Chat, Manage Squads */}
-      <div className="grid grid-cols-3 gap-1.5 p-1.5 bg-[#090C13] border border-[#1C2230] rounded-2xl mb-4 shadow-sm">
+      {/* Sleek Minimalist 2-Tab Navigator: Challenges & Manage Squads */}
+      <div className="grid grid-cols-2 gap-1.5 p-1.5 bg-[#090C13] border border-[#1C2230] rounded-2xl mb-4 shadow-sm">
         <button
           type="button"
           onClick={() => setViewMode('challenges')}
-          className={`py-2 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
+          className={`py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
             viewMode === 'challenges'
               ? 'border-[#2166FF] bg-[#2166FF]/20 text-white font-bold shadow-sm shadow-[#2166FF]/30 ring-1 ring-[#2166FF]'
               : 'border-[#1C2230] bg-[#121620]/60 text-[#8A92A6] hover:text-white hover:border-[#2C364D]'
@@ -358,21 +339,8 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
 
         <button
           type="button"
-          onClick={() => setViewMode('squad_chat')}
-          className={`py-2 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
-            viewMode === 'squad_chat'
-              ? 'border-[#2166FF] bg-[#2166FF]/20 text-white font-bold shadow-sm shadow-[#2166FF]/30 ring-1 ring-[#2166FF]'
-              : 'border-[#1C2230] bg-[#121620]/60 text-[#8A92A6] hover:text-white hover:border-[#2C364D]'
-          }`}
-        >
-          <MessageSquare size={13} className={viewMode === 'squad_chat' ? 'text-[#3B82FF]' : 'text-[#8A92A6]'} />
-          <span>Squad Chat</span>
-        </button>
-
-        <button
-          type="button"
           onClick={() => setViewMode('manage_squads')}
-          className={`py-2 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
+          className={`py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
             viewMode === 'manage_squads'
               ? 'border-[#2166FF] bg-[#2166FF]/20 text-white font-bold shadow-sm shadow-[#2166FF]/30 ring-1 ring-[#2166FF]'
               : 'border-[#1C2230] bg-[#121620]/60 text-[#8A92A6] hover:text-white hover:border-[#2C364D]'
@@ -383,199 +351,8 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
         </button>
       </div>
 
-      {/* ================= 1. SQUAD CHAT VIEW ================= */}
-      {viewMode === 'squad_chat' ? (
-        <div className="space-y-4 animate-fade-in">
-          {/* Section Subheader */}
-          <div className="flex items-center justify-between pb-1">
-            <div>
-              <h2 className="text-xs font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
-                <MessageSquare size={14} className="text-[#3B82FF]" />
-                <span>Squad Team Chat</span>
-              </h2>
-              <p className="text-[11px] text-[#8A92A6]">
-                Dedicated private discussion rooms for formed squad cohorts to strategize and support each other
-              </p>
-            </div>
-            <span className="text-[10px] font-mono text-[#3B82FF] bg-[#2166FF]/10 px-2 py-0.5 rounded-full border border-[#2166FF]/20">
-              Live Squad Chat
-            </span>
-          </div>
-
-          {squads.length === 0 ? (
-            <div className="py-14 text-center text-[#8A92A6] bg-[#090C13] rounded-2xl border border-[#1C2230] p-6 space-y-3">
-              <Users size={32} className="mx-auto text-[#2166FF] opacity-70" />
-              <p className="text-sm font-bold text-white">No Squads Formed Yet</p>
-              <p className="text-xs text-[#8A92A6] max-w-sm mx-auto leading-relaxed">
-                Squads provide dedicated team chats to coordinate daily photo check-ins and maintain mutual accountability.
-              </p>
-              <button
-                type="button"
-                onClick={() => setViewMode('manage_squads')}
-                className="px-4 py-2 rounded-xl bg-[#2166FF] hover:bg-[#1a52cc] text-white text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-md shadow-[#2166FF]/25"
-              >
-                <Plus size={13} />
-                <span>Create or Join a Squad</span>
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {/* Squad Selector Carousel/Pills */}
-              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
-                {squads.map((squad) => {
-                  const isSelected = selectedSquadIdForChat === squad.id;
-                  const memberCount = (squad.members || []).length + (squad.creator ? 1 : 0);
-                  return (
-                    <button
-                      key={squad.id}
-                      type="button"
-                      onClick={() => setSelectedSquadIdForChat(squad.id)}
-                      className={`px-3 py-2 rounded-xl border text-xs font-semibold whitespace-nowrap flex items-center gap-2 transition-all cursor-pointer ${
-                        isSelected
-                          ? 'bg-[#2166FF] text-white border-[#2166FF] shadow-md shadow-[#2166FF]/25'
-                          : 'bg-[#090C13] border-[#1C2230] text-[#8A92A6] hover:text-white hover:border-[#2C364D]'
-                      }`}
-                    >
-                      <Users size={12} className={isSelected ? 'text-white' : 'text-[#3B82FF]'} />
-                      <span>{squad.name}</span>
-                      <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
-                        isSelected ? 'bg-white/20 text-white' : 'bg-[#141926] text-[#8A92A6]'
-                      }`}>
-                        {memberCount}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Active Squad Chat Window */}
-              {(() => {
-                const activeSquad = squads.find(s => s.id === selectedSquadIdForChat) || squads[0];
-                if (!activeSquad) return null;
-                const squadCh = challenges.find(c => c.id === activeSquad.challengeId);
-                const activeSquadMembers = (activeSquad.members || []);
-
-                return (
-                  <div className="rounded-2xl bg-[#090C13] border border-[#1C2230] overflow-hidden flex flex-col shadow-xl">
-                    {/* Squad Chat Header */}
-                    <div className="p-3.5 border-b border-[#1C2230] bg-[#0c1017] flex items-center justify-between gap-3 flex-wrap">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="w-9 h-9 rounded-xl bg-[#121622] border border-[#202738] flex items-center justify-center text-[#3B82FF] shrink-0">
-                          <Users size={16} />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <h3 className="text-xs font-bold text-white truncate">{activeSquad.name}</h3>
-                            <span className="text-[10px] font-mono px-2 py-0.2 rounded-full bg-[#2166FF]/20 text-[#3B82FF] border border-[#2166FF]/30 uppercase">
-                              {activeSquad.category}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-[#8A92A6] truncate mt-0.5">
-                            Challenge: <span className="text-white font-medium">{activeSquad.challengeTitle || squadCh?.title || 'Daily Sprint'}</span>
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Members Avatars Row */}
-                      <div className="flex items-center -space-x-1.5 overflow-hidden">
-                        {activeSquadMembers.slice(0, 5).map((m, idx) => (
-                          <img
-                            key={idx}
-                            src={m.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80'}
-                            alt={m.name}
-                            title={`${m.name} (@${m.username})`}
-                            className="w-6 h-6 rounded-full object-cover border-2 border-[#090C13]"
-                          />
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Messages Scroll Area */}
-                    <div className="p-4 space-y-3 min-h-[260px] max-h-[380px] overflow-y-auto bg-[#06080D]">
-                      {squadChatMessages.length === 0 ? (
-                        <div className="py-12 text-center text-[#8A92A6] space-y-2">
-                          <Sparkles size={24} className="mx-auto text-[#2166FF] opacity-60" />
-                          <p className="text-xs font-semibold text-white">Squad Channel Ready</p>
-                          <p className="text-[11px] text-[#8A92A6] max-w-xs mx-auto">
-                            Send the first message to coordinate today&apos;s photo check-in, set workout times, or share daily goals!
-                          </p>
-                        </div>
-                      ) : (
-                        squadChatMessages.map((msg) => {
-                          const author = msg.author || (msg.sender
-                            ? {
-                                id: msg.sender.id,
-                                name: msg.sender.name,
-                                username: msg.sender.username,
-                                avatar: msg.sender.avatar,
-                              }
-                            : {
-                                id: '',
-                                name: 'Unknown member',
-                                username: 'unknown',
-                                avatar: '',
-                              });
-                          const isMe = author.username === currentUser?.username;
-                          return (
-                            <div
-                              key={msg.id}
-                              className={`flex items-start gap-2.5 ${isMe ? 'flex-row-reverse' : ''}`}
-                            >
-                              <img
-                                src={author.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80'}
-                                alt={author.name}
-                                className="w-7 h-7 rounded-full object-cover border border-[#202738] shrink-0 mt-0.5"
-                              />
-                              <div className={`max-w-[80%] space-y-1 ${isMe ? 'items-end' : ''}`}>
-                                <div className={`flex items-center gap-1.5 text-[10px] ${isMe ? 'justify-end' : ''}`}>
-                                  <span className="font-bold text-white">{isMe ? 'You' : author.name}</span>
-                                  <span className="text-[#8A92A6] font-mono">@{author.username}</span>
-                                  <span className="text-[#8A92A6]">·</span>
-                                  <span className="text-[#8A92A6] font-mono">{msg.timestamp}</span>
-                                </div>
-                                <div className={`p-3 rounded-2xl text-xs leading-relaxed ${
-                                  isMe
-                                    ? 'bg-[#2166FF] text-white rounded-tr-sm'
-                                    : 'bg-[#121620] text-gray-200 border border-[#1C2230] rounded-tl-sm'
-                                }`}>
-                                  {msg.text}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-
-                    {/* Chat Input Bar */}
-                    <form
-                      onSubmit={handleSendSquadMessage}
-                      className="p-3 border-t border-[#1C2230] bg-[#0c1017] flex items-center gap-2"
-                    >
-                      <input
-                        type="text"
-                        value={chatInputText}
-                        onChange={(e) => setChatInputText(e.target.value)}
-                        placeholder={`Message #${activeSquad.name.toLowerCase().replace(/\s+/g, '-')}...`}
-                        className="flex-1 bg-[#10141D] border border-[#1C2230] focus:border-[#2166FF] rounded-xl px-3 py-2 text-xs text-white placeholder-[#8A92A6] outline-none transition-colors"
-                      />
-                      <button
-                        type="submit"
-                        disabled={!chatInputText.trim()}
-                        className="px-3.5 py-2 rounded-xl bg-[#2166FF] hover:bg-[#1a55d6] disabled:opacity-40 text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
-                      >
-                        <Send size={13} />
-                        <span>Send</span>
-                      </button>
-                    </form>
-                  </div>
-                );
-              })()}
-            </div>
-          )}
-        </div>
-      ) : viewMode === 'manage_squads' ? (
-        /* ================= 2. MANAGE SQUADS VIEW ================= */
+      {/* ================= MANAGE SQUADS VIEW ================= */}
+      {viewMode === 'manage_squads' ? (
         <div className="space-y-4 animate-fade-in">
           <div className="flex items-center justify-between pb-1">
             <div>
@@ -584,7 +361,7 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
                 <span>Squads & Challenge Members</span>
               </h2>
               <p className="text-[11px] text-[#8A92A6]">
-                Manage team rosters, invite members, and enter 5-member sprints
+                Manage team rosters, invite members, and open squad team chats
               </p>
             </div>
 
@@ -597,6 +374,34 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
               <span>Create Squad</span>
             </button>
           </div>
+
+          {/* Squad Team Chats Entry Card inside Manage Squads */}
+          {onOpenSquadChats && (
+            <div
+              onClick={() => onOpenSquadChats(undefined, 'list')}
+              className="p-3.5 rounded-2xl bg-[#090C13] hover:bg-[#0E121B] border border-[#1C2230] hover:border-[#2166FF]/40 transition-all flex items-center justify-between gap-3 cursor-pointer group shadow-sm"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-[#121622] border border-[#202738] flex items-center justify-center text-[#3B82FF] shrink-0 group-hover:scale-105 transition-transform">
+                  <MessageSquare size={17} />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-white group-hover:text-[#3B82FF] transition-colors truncate">
+                      Squad Team Chats
+                    </span>
+                    <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/15 px-1.5 py-0.5 rounded-full">
+                      {squads.length} {squads.length === 1 ? 'Room' : 'Rooms'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-[#8A92A6] truncate">
+                    Open squad chat rooms, strategy & live updates
+                  </p>
+                </div>
+              </div>
+              <ChevronRight size={17} className="text-[#8A92A6] group-hover:text-white shrink-0 transition-colors" />
+            </div>
+          )}
 
           {squads.map((squad) => {
             const squadCh = challenges.find(c => c.id === squad.challengeId) || challenges[0];
@@ -678,7 +483,13 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
 
                     <button
                       type="button"
-                      onClick={() => onOpenCohortDiscussions(squadCh, 'detail')}
+                      onClick={() => {
+                        if (onOpenSquadChats) {
+                          onOpenSquadChats(squad, 'detail');
+                        } else {
+                          onOpenCohortDiscussions(squadCh, 'detail');
+                        }
+                      }}
                       className="px-3 py-1.5 rounded-xl bg-[#2166FF] hover:bg-[#3B82FF] text-white text-xs font-semibold flex items-center gap-1 shadow-md shadow-[#2166FF]/20 cursor-pointer"
                     >
                       <MessageSquare size={13} />
@@ -872,128 +683,151 @@ export const ChallengesScreen: React.FC<ChallengesScreenProps> = ({
           })}
         </div>
       ) : (
-        /* ================= 3. ALL CHALLENGES VIEW (MINIMALIST & CLEAN) ================= */
+        /* ================= ALL CHALLENGES VIEW (MINIMALIST & CLEAN) ================= */
         <div className="space-y-4 animate-fade-in">
-          {/* Cohort Discussions & Squad Team Chats Dual Banners */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {/* Cohort Discussions Entry Banner */}
-            <div
-              onClick={() => onOpenCohortDiscussions(undefined, 'list')}
-              className="p-3.5 rounded-2xl bg-[#090C13] hover:bg-[#0E121B] border border-[#1C2230] hover:border-[#2166FF]/40 transition-all flex items-center justify-between gap-3 cursor-pointer group shadow-sm"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-9 h-9 rounded-xl bg-[#121622] border border-[#202738] flex items-center justify-center text-[#3B82FF] shrink-0 group-hover:scale-105 transition-transform">
-                  <MessageSquare size={17} />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-white group-hover:text-[#3B82FF] transition-colors truncate">
-                      Cohort Discussions
-                    </span>
-                    <span className="text-[10px] font-semibold text-[#3B82FF] bg-[#2166FF]/15 px-1.5 py-0.5 rounded-full">
-                      Active
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-[#8A92A6] truncate">
-                    View cohorts, submit daily photo proofs & track progress
-                  </p>
-                </div>
+          {/* Cohort Discussions Entry Banner */}
+          <div
+            onClick={() => onOpenCohortDiscussions(undefined, 'list')}
+            className="p-3.5 rounded-2xl bg-[#090C13] hover:bg-[#0E121B] border border-[#1C2230] hover:border-[#2166FF]/40 transition-all flex items-center justify-between gap-3 cursor-pointer group shadow-sm"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-[#121622] border border-[#202738] flex items-center justify-center text-[#3B82FF] shrink-0 group-hover:scale-105 transition-transform">
+                <MessageSquare size={17} />
               </div>
-              <ChevronRight size={17} className="text-[#8A92A6] group-hover:text-white shrink-0 transition-colors" />
-            </div>
-
-            {/* Squad Team Chats Entry Banner */}
-            <div
-              onClick={() => {
-                if (onOpenSquadChats) {
-                  onOpenSquadChats(undefined, 'list');
-                } else {
-                  setViewMode('squad_chat');
-                }
-              }}
-              className="p-3.5 rounded-2xl bg-[#090C13] hover:bg-[#0E121B] border border-[#1C2230] hover:border-[#2166FF]/40 transition-all flex items-center justify-between gap-3 cursor-pointer group shadow-sm"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-9 h-9 rounded-xl bg-[#121622] border border-[#202738] flex items-center justify-center text-[#3B82FF] shrink-0 group-hover:scale-105 transition-transform">
-                  <Users size={17} />
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-white group-hover:text-[#3B82FF] transition-colors truncate">
+                    Cohort Discussions
+                  </span>
+                  <span className="text-[10px] font-semibold text-[#3B82FF] bg-[#2166FF]/15 px-1.5 py-0.5 rounded-full">
+                    Active
+                  </span>
                 </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-white group-hover:text-[#3B82FF] transition-colors truncate">
-                      Squad Team Chats
-                    </span>
-                    <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/15 px-1.5 py-0.5 rounded-full">
-                      Squads
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-[#8A92A6] truncate">
-                    Open squad chat rooms, strategy & live updates
-                  </p>
-                </div>
+                <p className="text-[11px] text-[#8A92A6] truncate">
+                  View cohorts, submit daily photo proofs & track progress
+                </p>
               </div>
-              <ChevronRight size={17} className="text-[#8A92A6] group-hover:text-white shrink-0 transition-colors" />
             </div>
+            <ChevronRight size={17} className="text-[#8A92A6] group-hover:text-white shrink-0 transition-colors" />
           </div>
 
+          {/* Filter & Sort Dropdown Bars */}
+          <div className="grid grid-cols-2 gap-2 pb-0.5">
+            {/* Filter Dropdown */}
+            <div ref={filterDropdownRef} className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsFilterDropdownOpen((prev) => !prev);
+                  setIsSortDropdownOpen(false);
+                }}
+                className="w-full px-3 py-2 rounded-xl bg-[#090C13] hover:bg-[#0E121B] border border-[#1C2230] hover:border-[#2166FF]/40 text-xs font-semibold text-white flex items-center justify-between gap-2 transition-colors cursor-pointer"
+                aria-expanded={isFilterDropdownOpen}
+                aria-label="Filter challenges"
+              >
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <SlidersHorizontal size={13} className="text-[#3B82FF] shrink-0" />
+                  <span className="text-[#8A92A6] font-normal">Show:</span>
+                  <span className="truncate">
+                    {activeFilter === 'all'
+                      ? 'All'
+                      : activeFilter === 'squads'
+                      ? 'Squads'
+                      : activeFilter === 'solo'
+                      ? 'Solo'
+                      : 'Joined'}
+                  </span>
+                </span>
+                <ChevronDown
+                  size={14}
+                  className={`text-[#8A92A6] shrink-0 transition-transform ${isFilterDropdownOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
 
-
-          {/* Segmented Filter Pills & Sort Selector */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pb-0.5">
-            <div className="grid grid-cols-4 gap-1 p-1 bg-[#090C13] border border-[#1C2230] rounded-xl flex-1 min-w-[260px]">
-              <button
-                onClick={() => setActiveFilter('all')}
-                className={`py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                  activeFilter === 'all' ? 'bg-[#2166FF] text-white shadow-sm' : 'text-[#8A92A6] hover:text-white'
-                }`}
-              >
-                All
-              </button>
-              <button
-                onClick={() => setActiveFilter('squads')}
-                className={`py-1 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                  activeFilter === 'squads' ? 'bg-[#2166FF] text-white shadow-sm' : 'text-[#8A92A6] hover:text-white'
-                }`}
-              >
-                <Users size={11} />
-                <span>Squads</span>
-              </button>
-              <button
-                onClick={() => setActiveFilter('solo')}
-                className={`py-1 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                  activeFilter === 'solo' ? 'bg-[#2166FF] text-white shadow-sm' : 'text-[#8A92A6] hover:text-white'
-                }`}
-              >
-                <Target size={11} />
-                <span>Solo</span>
-              </button>
-              <button
-                onClick={() => setActiveFilter('joined')}
-                className={`py-1 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                  activeFilter === 'joined' ? 'bg-[#2166FF] text-white shadow-sm' : 'text-[#8A92A6] hover:text-white'
-                }`}
-              >
-                <Check size={11} />
-                <span>Joined</span>
-              </button>
+              {isFilterDropdownOpen && (
+                <div className="absolute left-0 right-0 top-full mt-1.5 bg-[#090C13] border border-[#1C2230] rounded-xl shadow-2xl p-1 z-30 space-y-0.5">
+                  {([
+                    { value: 'all', label: 'All' },
+                    { value: 'squads', label: 'Squads' },
+                    { value: 'solo', label: 'Solo' },
+                    { value: 'joined', label: 'Joined' },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => {
+                        setActiveFilter(opt.value);
+                        setIsFilterDropdownOpen(false);
+                      }}
+                      className={`w-full px-3 py-2 rounded-lg text-xs font-medium flex items-center justify-between transition-colors cursor-pointer ${
+                        activeFilter === opt.value
+                          ? 'bg-[#2166FF] text-white font-semibold'
+                          : 'text-[#8A92A6] hover:text-white hover:bg-[#121620]'
+                      }`}
+                    >
+                      <span>{opt.label}</span>
+                      {activeFilter === opt.value && <Check size={12} />}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* Sort Menu: Recently Added | Popularity | Difficulty */}
-            <div className="flex items-center gap-1 p-1 bg-[#090C13] border border-[#1C2230] rounded-xl self-end sm:self-auto text-xs">
-              <span className="text-[10px] text-[#8A92A6] px-1 font-mono uppercase">Sort:</span>
-              {(['recent', 'popularity', 'difficulty'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => setSortBy(mode)}
-                  className={`px-2 py-0.5 rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
-                    sortBy === mode
-                      ? 'bg-[#2166FF] text-white font-semibold shadow-sm'
-                      : 'text-[#8A92A6] hover:text-white'
-                  }`}
-                >
-                  {mode === 'recent' ? 'Recently Added' : mode === 'popularity' ? 'Popularity' : 'Difficulty'}
-                </button>
-              ))}
+            {/* Sort Dropdown */}
+            <div ref={sortDropdownRef} className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSortDropdownOpen((prev) => !prev);
+                  setIsFilterDropdownOpen(false);
+                }}
+                className="w-full px-3 py-2 rounded-xl bg-[#090C13] hover:bg-[#0E121B] border border-[#1C2230] hover:border-[#2166FF]/40 text-xs font-semibold text-white flex items-center justify-between gap-2 transition-colors cursor-pointer"
+                aria-expanded={isSortDropdownOpen}
+                aria-label="Sort challenges"
+              >
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <ArrowUpDown size={13} className="text-[#3B82FF] shrink-0" />
+                  <span className="text-[#8A92A6] font-normal">Sort:</span>
+                  <span className="truncate">
+                    {sortBy === 'recent'
+                      ? 'Recently Added'
+                      : sortBy === 'popularity'
+                      ? 'Popularity'
+                      : 'Difficulty'}
+                  </span>
+                </span>
+                <ChevronDown
+                  size={14}
+                  className={`text-[#8A92A6] shrink-0 transition-transform ${isSortDropdownOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+
+              {isSortDropdownOpen && (
+                <div className="absolute left-0 right-0 top-full mt-1.5 bg-[#090C13] border border-[#1C2230] rounded-xl shadow-2xl p-1 z-30 space-y-0.5">
+                  {([
+                    { value: 'recent', label: 'Recently Added' },
+                    { value: 'popularity', label: 'Popularity' },
+                    { value: 'difficulty', label: 'Difficulty' },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => {
+                        setSortBy(opt.value);
+                        setIsSortDropdownOpen(false);
+                      }}
+                      className={`w-full px-3 py-2 rounded-lg text-xs font-medium flex items-center justify-between transition-colors cursor-pointer ${
+                        sortBy === opt.value
+                          ? 'bg-[#2166FF] text-white font-semibold'
+                          : 'text-[#8A92A6] hover:text-white hover:bg-[#121620]'
+                      }`}
+                    >
+                      <span>{opt.label}</span>
+                      {sortBy === opt.value && <Check size={12} />}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

@@ -19,7 +19,17 @@ const KEYS = {
   DELETED_SQUADS: 'daily_app_deleted_squads',
   CROSS_POST_TO_FEED: 'daily_app_cross_post_to_feed',
   CUSTOM_HASHTAGS: 'daily_app_custom_hashtags',
+  THEME: 'daily_app_theme',
+  SAVED_ACCOUNTS: 'daily_app_saved_accounts',
 };
+
+export interface SavedAccount {
+  user: Author;
+  authSession: { provider: 'google' | 'email' | 'guest'; email?: string };
+  accessToken?: string;
+  refreshToken?: string;
+  lastActiveAt: string;
+}
 
 // Safe JSON parser
 function safeParse<T>(key: string, fallback: T): T {
@@ -50,6 +60,58 @@ export const StorageService = {
 
   setOnboardingCompleted(completed: boolean): void {
     safeSet(KEYS.ONBOARDING_DONE, completed);
+  },
+
+  // Theme Preference ('dark' | 'light')
+  getTheme(): 'dark' | 'light' {
+    const val = safeParse<string>(KEYS.THEME, 'dark');
+    return val === 'light' ? 'light' : 'dark';
+  },
+
+  setTheme(theme: 'dark' | 'light'): void {
+    safeSet(KEYS.THEME, theme);
+  },
+
+  // Saved Multi-Account Registry
+  getSavedAccounts(): SavedAccount[] {
+    const list = safeParse<SavedAccount[]>(KEYS.SAVED_ACCOUNTS, []);
+    return Array.isArray(list) ? list : [];
+  },
+
+  upsertSavedAccount(account: SavedAccount): SavedAccount[] {
+    if (!account.user || (!account.user.id && !account.user.username)) {
+      return this.getSavedAccounts();
+    }
+    if (account.user.username === 'builder' && !account.user.id) {
+      return this.getSavedAccounts();
+    }
+    const list = this.getSavedAccounts();
+    const matchIndex = list.findIndex((item) =>
+      (account.user.id && item.user.id && item.user.id === account.user.id) ||
+      (account.user.username && item.user.username && item.user.username.toLowerCase() === account.user.username.toLowerCase())
+    );
+    const updatedAccount: SavedAccount = {
+      ...account,
+      accessToken: account.accessToken || (matchIndex >= 0 ? list[matchIndex].accessToken : undefined),
+      refreshToken: account.refreshToken || (matchIndex >= 0 ? list[matchIndex].refreshToken : undefined),
+      lastActiveAt: account.lastActiveAt || new Date().toISOString(),
+    };
+    const nextList = matchIndex >= 0
+      ? list.map((item, idx) => (idx === matchIndex ? updatedAccount : item))
+      : [updatedAccount, ...list];
+    safeSet(KEYS.SAVED_ACCOUNTS, nextList);
+    return nextList;
+  },
+
+  removeSavedAccount(userId?: string, username?: string): SavedAccount[] {
+    const cleanUsername = username?.toLowerCase().replace(/^@/, '');
+    const nextList = this.getSavedAccounts().filter((item) => {
+      const sameId = Boolean(userId && item.user.id && item.user.id === userId);
+      const sameUsername = Boolean(cleanUsername && item.user.username && item.user.username.toLowerCase().replace(/^@/, '') === cleanUsername);
+      return !sameId && !sameUsername;
+    });
+    safeSet(KEYS.SAVED_ACCOUNTS, nextList);
+    return nextList;
   },
 
   // Auth Session
@@ -531,6 +593,43 @@ export const StorageService = {
       }
     } catch (e) {
       console.error('Error clearing demo content:', e);
+    }
+  },
+
+  purgeDeletedUserContributions(userId?: string, username?: string): void {
+    try {
+      const cleanUsername = username?.toLowerCase().replace(/^@/, '');
+      const registry = this.getCommentsRegistry();
+      let changed = false;
+      Object.keys(registry).forEach((postId) => {
+        const prev = registry[postId] || [];
+        const next = prev.filter((c) => {
+          const matchesId = Boolean(userId && c.author?.id && c.author.id === userId);
+          const matchesUsername = Boolean(cleanUsername && c.author?.username && c.author.username.toLowerCase().replace(/^@/, '') === cleanUsername);
+          return !matchesId && !matchesUsername;
+        });
+        if (next.length !== prev.length) {
+          changed = true;
+          registry[postId] = next;
+        }
+      });
+      if (changed) {
+        safeSet(KEYS.COMMENTS_REGISTRY, registry);
+      }
+
+      if (userId) {
+        [
+          `daily_app_user_credits_${userId}`,
+          `daily_app_comm_votes_${userId}`,
+          `daily_app_user_likes_${userId}`,
+          `daily_app_user_bookmarks_${userId}`,
+          `daily_app_user_follows_${userId}`,
+        ].forEach((k) => localStorage.removeItem(k));
+      }
+
+      this.removeSavedAccount(userId, username);
+    } catch (e) {
+      console.error('Error purging deleted user contributions:', e);
     }
   },
 

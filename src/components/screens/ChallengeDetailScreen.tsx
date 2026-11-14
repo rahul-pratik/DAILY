@@ -20,16 +20,17 @@ import {
   Trash2,
   CheckSquare,
   Square,
-  Share2
+  Share2,
+  Crop
 } from 'lucide-react';
 import { Author, Challenge } from '../../types';
+import { ImageCropModal } from '../modals/ImageCropModal';
 
 interface ChallengeDetailScreenProps {
   challenge: Challenge;
   currentUser: Author;
   onBack: () => void;
   onCheckInWithProof: (challengeId: string, note: string, photoUrl?: string, isDailyProof?: boolean) => void;
-  onQuickCheckIn?: (challengeId: string) => void;
   onAddToTodoList?: (challenge: Challenge) => void;
   onOpenCohortChat: () => void;
   onToggleJoin?: (challengeId: string) => void;
@@ -44,7 +45,6 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
   currentUser,
   onBack,
   onCheckInWithProof,
-  onQuickCheckIn,
   onAddToTodoList,
   onOpenCohortChat,
   onToggleJoin,
@@ -53,9 +53,9 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
   onPostAsDailyProof,
   isInTodoList = false,
 }) => {
-  const [justRecorded, setJustRecorded] = useState(false);
-  const [isQuickCheckingIn, setIsQuickCheckingIn] = useState(false);
   const [proofPhoto, setProofPhoto] = useState<string | null>(null);
+  const [rawImageToCrop, setRawImageToCrop] = useState<string>('');
+  const [isCropModalOpen, setIsCropModalOpen] = useState(false);
   const [showProofForm, setShowProofForm] = useState(false);
   const [addAsDailyProof, setAddAsDailyProof] = useState(true);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -133,7 +133,8 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
     if (ctx) {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-      setProofPhoto(dataUrl);
+      setRawImageToCrop(dataUrl);
+      setIsCropModalOpen(true);
       stopCameraStream();
     }
   };
@@ -151,7 +152,8 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
     const reader = new FileReader();
     reader.onload = (event) => {
       if (event.target?.result) {
-        setProofPhoto(event.target.result as string);
+        setRawImageToCrop(event.target.result as string);
+        setIsCropModalOpen(true);
       }
     };
     reader.readAsDataURL(file);
@@ -184,24 +186,6 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
     onCheckInWithProof(challenge.id, '', proofPhoto, addAsDailyProof);
     setProofPhoto(null);
     setShowProofForm(false);
-  };
-
-  // Instant Quick Check-in handler without navigating away
-  const handleQuickCheckInClick = () => {
-    if (isCompleted || isQuickCheckingIn) return;
-    setIsQuickCheckingIn(true);
-    setJustRecorded(true);
-
-    if (onQuickCheckIn) {
-      onQuickCheckIn(challenge.id);
-    } else {
-      onCheckInWithProof(challenge.id, `Completed Day ${(challenge.current || 0) + 1} quick check-in`, undefined, false);
-    }
-
-    setTimeout(() => {
-      setJustRecorded(false);
-      setIsQuickCheckingIn(false);
-    }, 2500);
   };
 
   // Cleanup camera when unmounting
@@ -550,13 +534,25 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
               </div>
             </div>
           ) : proofPhoto ? (
-            <div className="relative rounded-2xl overflow-hidden border border-[#20242C] aspect-video bg-[#101010]">
+            <div className="relative rounded-2xl overflow-hidden border border-[#20242C] aspect-square max-h-72 mx-auto bg-[#101010]">
               <img src={proofPhoto} alt="Proof" className="w-full h-full object-cover" />
               <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[11px] font-semibold text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
                 <Check size={12} />
                 <span>Photo Proof Attached</span>
               </div>
               <div className="absolute top-2 right-2 flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRawImageToCrop(proofPhoto);
+                    setIsCropModalOpen(true);
+                  }}
+                  className="px-2.5 py-1 rounded-full bg-black/80 hover:bg-[#2166FF] text-white text-[11px] font-medium flex items-center gap-1 cursor-pointer border border-white/20 transition-colors"
+                  title="Crop photo"
+                >
+                  <Crop size={12} />
+                  <span>Crop</span>
+                </button>
                 <button
                   type="button"
                   onClick={handleOpenCameraWithPermission}
@@ -746,44 +742,19 @@ export const ChallengeDetailScreen: React.FC<ChallengeDetailScreenProps> = ({
         </ul>
       </div>
 
-      {/* Floating Quick Check-in CTA Button */}
-      <div className="sticky bottom-4 z-30 flex justify-end pointer-events-none mt-6 pb-2">
-        <button
-          type="button"
-          onClick={handleQuickCheckInClick}
-          disabled={isCompleted || isQuickCheckingIn}
-          className={`pointer-events-auto flex items-center gap-2.5 px-4 sm:px-5 py-3 rounded-2xl font-bold text-xs tracking-wide shadow-2xl backdrop-blur-md transition-all active:scale-95 cursor-pointer border ${
-            isCompleted
-              ? 'bg-[#10141E]/95 text-emerald-400 border-emerald-500/30 shadow-none cursor-default'
-              : justRecorded
-              ? 'bg-emerald-600 text-white border-emerald-400 shadow-emerald-500/30 ring-2 ring-emerald-400/50'
-              : 'bg-[#2166FF] hover:bg-[#3B82FF] text-white border-[#3B82FF]/40 shadow-lg shadow-[#2166FF]/40 hover:shadow-xl hover:shadow-[#2166FF]/50 ring-1 ring-white/20'
-          }`}
-          aria-label="Quick Check-in"
-        >
-          {isCompleted ? (
-            <>
-              <CheckCircle size={16} className="text-emerald-400 shrink-0" />
-              <span>Challenge Completed</span>
-            </>
-          ) : justRecorded ? (
-            <>
-              <Check size={16} className="stroke-[3] text-white shrink-0 animate-scale-in" />
-              <span>Day {challenge.current} Recorded!</span>
-            </>
-          ) : (
-            <>
-              <Flame size={16} className="text-amber-300 fill-amber-300 shrink-0 animate-pulse" />
-              <div className="flex flex-col text-left leading-tight">
-                <span className="font-extrabold text-xs">Quick Check-in</span>
-                <span className="text-[10px] text-white/80 font-mono font-normal">
-                  {challenge.joined ? `Log Day ${(challenge.current || 0) + 1}` : 'Start & Log Day 1'}
-                </span>
-              </div>
-            </>
-          )}
-        </button>
-      </div>
+      {isCropModalOpen && (
+        <ImageCropModal
+          isOpen={isCropModalOpen}
+          imageUrl={rawImageToCrop}
+          mode="square"
+          title="Crop Photo"
+          onCropComplete={(croppedDataUrl) => {
+            setProofPhoto(croppedDataUrl);
+            setIsCropModalOpen(false);
+          }}
+          onClose={() => setIsCropModalOpen(false)}
+        />
+      )}
     </div>
   );
 };

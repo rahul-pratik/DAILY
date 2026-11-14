@@ -2,28 +2,30 @@ import React, { useState } from 'react';
 import { 
   X, 
   Moon, 
-  Shield, 
+  Sun,
   Globe, 
   Lock, 
-  Database, 
   Trash2, 
-  RefreshCw, 
   UserCheck,
   LogOut,
   LogIn,
   AlertTriangle,
   UserX,
-  Share2
+  Share2,
+  Check,
+  Users
 } from 'lucide-react';
 import { Author } from '../../types';
-import { isSupabaseConfigured } from '../../lib/supabase';
-import { StorageService } from '../../services/storageService';
+import { SavedAccount, StorageService } from '../../services/storageService';
 
 interface SettingsModalProps {
   onClose: () => void;
   currentUser?: Author;
+  theme?: 'dark' | 'light';
+  onChangeTheme?: (theme: 'dark' | 'light') => void;
+  savedAccounts?: SavedAccount[];
+  onSwitchAccount?: (account: SavedAccount) => void;
   onToggleHubPrivacy?: (newPrivacy: 'public' | 'private') => void;
-  onResetToFreshData?: () => void;
   onSignOut?: () => void;
   onLogIn?: () => void;
   onDeleteAccount?: () => void;
@@ -32,17 +34,28 @@ interface SettingsModalProps {
 export const SettingsModal: React.FC<SettingsModalProps> = ({ 
   onClose,
   currentUser,
+  theme = 'dark',
+  onChangeTheme,
+  savedAccounts = [],
+  onSwitchAccount,
   onToggleHubPrivacy,
-  onResetToFreshData,
   onSignOut,
   onLogIn,
   onDeleteAccount,
 }) => {
   const isPrivate = currentUser?.accountabilityHubPrivacy === 'private';
-  const authSession = StorageService.getAuthSession();
   const [deleteAccountConfirmed, setDeleteAccountConfirmed] = useState(false);
-  const [resetContentConfirmed, setResetContentConfirmed] = useState(false);
   const [crossPostToFeed, setCrossPostToFeed] = useState<boolean>(() => StorageService.getCrossPostToFeed());
+
+  const otherAccounts = savedAccounts.filter((acc) => {
+    const sameId = Boolean(currentUser?.id && acc.user.id && acc.user.id === currentUser.id);
+    const sameUsername = Boolean(
+      currentUser?.username &&
+      acc.user.username &&
+      acc.user.username.toLowerCase() === currentUser.username.toLowerCase()
+    );
+    return !sameId && !sameUsername;
+  });
 
   return (
     <div
@@ -54,12 +67,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         className="w-full max-w-md bg-[#080B10] border border-[#20242C] rounded-t-3xl sm:rounded-3xl shadow-2xl p-5 overflow-hidden max-h-[92dvh] overflow-y-auto no-scrollbar"
       >
         <div className="flex items-center justify-between mb-4 pb-2 border-b border-[#20242C]">
-          <div className="flex items-center gap-2">
-            <h3 className="text-base font-bold text-white">Account & App Settings</h3>
-            <span className="text-[10px] font-mono bg-[#2166FF]/20 text-[#3B82FF] px-2 py-0.5 rounded-full border border-[#2166FF]/30">
-              Live
-            </span>
-          </div>
+          <h3 className="text-base font-bold text-white">Account & App Settings</h3>
           <button
             onClick={onClose}
             className="w-8 h-8 rounded-full flex items-center justify-center text-[#9298A3] hover:text-white cursor-pointer"
@@ -77,9 +85,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <UserCheck size={14} className="text-[#3B82FF]" />
                 <span>Account Profile</span>
               </span>
-              <span className="text-[10px] font-mono text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                {authSession?.provider ? `${authSession.provider.toUpperCase()} SESSION` : 'ACTIVE PROFILE'}
-              </span>
             </div>
 
             <div className="flex items-center gap-3">
@@ -91,11 +96,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-bold text-white truncate">{currentUser?.name || 'Daily Builder'}</p>
                 <p className="text-[11px] font-mono text-[#3B82FF] truncate">@{currentUser?.username || 'builder'}</p>
-                {authSession?.email && (
-                  <p className="text-[10px] text-[#9298A3] truncate">{authSession.email}</p>
-                )}
               </div>
             </div>
+
+            {/* Direct Account Switcher list when multiple accounts are logged in */}
+            {otherAccounts.length > 0 && onSwitchAccount && (
+              <div className="pt-2 border-t border-[#20242C]/70 space-y-1.5">
+                <span className="text-[10px] font-semibold text-[#9298A3] uppercase tracking-wider flex items-center gap-1.5">
+                  <Users size={11} className="text-[#3B82FF]" />
+                  <span>Switch Account</span>
+                </span>
+                <div className="space-y-1.5">
+                  {otherAccounts.map((acc) => (
+                    <button
+                      key={acc.user.id || acc.user.username}
+                      type="button"
+                      onClick={() => {
+                        onSwitchAccount(acc);
+                        onClose();
+                      }}
+                      className="w-full p-2 rounded-xl bg-[#080B10] hover:bg-[#161B26] border border-[#20242C] hover:border-[#2166FF]/50 flex items-center justify-between gap-2.5 transition-colors cursor-pointer text-left"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <img
+                          src={acc.user.avatar}
+                          alt={acc.user.name}
+                          className="w-8 h-8 rounded-lg object-cover border border-[#20242C] shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-white truncate">{acc.user.name}</p>
+                          <p className="text-[10px] font-mono text-[#3B82FF] truncate">@{acc.user.username}</p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-semibold px-2 py-1 rounded-lg bg-[#2166FF]/15 text-[#3B82FF] border border-[#2166FF]/30 shrink-0">
+                        Switch
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Account Quick Action Buttons */}
             <div className="grid grid-cols-2 gap-2 pt-1 border-t border-[#20242C]/70">
@@ -103,13 +143,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    onLogIn();
                     onClose();
+                    onLogIn();
                   }}
                   className="py-2 px-2.5 rounded-xl bg-[#161B26] hover:bg-[#202738] border border-[#242C3D] text-[11px] font-semibold text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <LogIn size={13} className="text-[#3B82FF]" />
-                  <span className="truncate">Switch / Log In</span>
+                  <span className="truncate">{otherAccounts.length > 0 ? 'Add / Log In' : 'Switch / Log In'}</span>
                 </button>
               )}
 
@@ -189,102 +229,59 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           </div>
 
-          {/* Supabase Schema Status */}
-          <div className="p-3.5 rounded-2xl bg-[#0b1220] border border-[#2166FF]/30 space-y-2">
+          {/* Appearance: Dark Theme & Light Theme toggle */}
+          <div className="p-3.5 rounded-2xl bg-[#101010] border border-[#20242C] space-y-2.5">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Database size={16} className="text-[#3B82FF]" />
-                <span className="text-xs font-bold text-white">Supabase Schema Status</span>
+              <div className="flex items-center gap-3">
+                {theme === 'light' ? (
+                  <Sun size={18} className="text-[#3B82FF]" />
+                ) : (
+                  <Moon size={18} className="text-[#3B82FF]" />
+                )}
+                <div>
+                  <p className="text-xs font-semibold text-white">Appearance</p>
+                  <p className="text-[11px] text-[#9298A3]">
+                    {theme === 'light' ? 'Light Theme active' : 'Dark Theme active'}
+                  </p>
+                </div>
               </div>
-              <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${
-                isSupabaseConfigured
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                  : 'bg-[#2166FF]/20 text-[#3B82FF] border border-[#2166FF]/30'
-              }`}>
-                {isSupabaseConfigured ? 'CONNECTED' : 'READY TO CONNECT'}
-              </span>
             </div>
-            <p className="text-[11px] text-[#9298A3] leading-relaxed">
-              Target tables configured for instant sync: <span className="font-mono text-white/90">profiles, posts, challenges, proofs, communities</span>.
-            </p>
-          </div>
 
-          {/* Data Persistence */}
-          <div className="p-3.5 rounded-2xl bg-[#101010] border border-[#20242C] flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Shield size={18} className="text-[#3B82FF]" />
-              <div>
-                <p className="text-xs font-semibold text-white">Genuine Data Persistence</p>
-                <p className="text-[11px] text-[#9298A3]">All created posts, proofs & challenges saved</p>
-              </div>
-            </div>
-            <span className="text-[10px] font-mono text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-              Active
-            </span>
-          </div>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => onChangeTheme?.('dark')}
+                className={`py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                  theme === 'dark'
+                    ? 'bg-[#2166FF] text-white border-[#2166FF] shadow-sm shadow-[#2166FF]/25'
+                    : 'bg-[#080B10] text-[#9298A3] border-[#20242C] hover:text-white'
+                }`}
+              >
+                <Moon size={13} />
+                <span>Dark Theme</span>
+                {theme === 'dark' && <Check size={12} />}
+              </button>
 
-          {/* Appearance */}
-          <div className="p-3.5 rounded-2xl bg-[#101010] border border-[#20242C] flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Moon size={18} className="text-[#3B82FF]" />
-              <div>
-                <p className="text-xs font-semibold text-white">Appearance</p>
-                <p className="text-[11px] text-[#9298A3]">Pure Black Minimal Dark Mode</p>
-              </div>
+              <button
+                type="button"
+                onClick={() => onChangeTheme?.('light')}
+                className={`py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                  theme === 'light'
+                    ? 'bg-[#2166FF] text-white border-[#2166FF] shadow-sm shadow-[#2166FF]/25'
+                    : 'bg-[#080B10] text-[#9298A3] border-[#20242C] hover:text-white'
+                }`}
+              >
+                <Sun size={13} />
+                <span>Light Theme</span>
+                {theme === 'light' && <Check size={12} />}
+              </button>
             </div>
-            <span className="text-[10px] font-mono font-bold text-[#3B82FF] bg-[#2166FF]/10 px-2 py-0.5 rounded">
-              Default
-            </span>
           </div>
         </div>
 
         {/* Action Controls & Account Deletion */}
         <div className="space-y-2 pt-2 border-t border-[#20242C]">
-          {onResetToFreshData && (
-            <div className="pt-1">
-              {!resetContentConfirmed ? (
-                <button
-                  type="button"
-                  onClick={() => setResetContentConfirmed(true)}
-                  className="w-full py-2.5 rounded-xl bg-[#101010] hover:bg-[#1a1f29] border border-[#20242C] text-xs font-semibold text-[#9298A3] hover:text-white flex items-center justify-center gap-2 transition-colors cursor-pointer"
-                >
-                  <RefreshCw size={14} />
-                  <span>Reset Demo Content to Blank</span>
-                </button>
-              ) : (
-                <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-2.5">
-                  <div className="flex items-center gap-2 text-amber-300 justify-center">
-                    <AlertTriangle size={15} />
-                    <span className="text-xs font-bold">Clear local demo content?</span>
-                  </div>
-                  <p className="text-[11px] text-[#c5cbd6] text-center leading-relaxed">
-                    This removes cached posts, follows, challenges, communities, and chat from this device. Your account and Supabase data will remain unchanged.
-                  </p>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setResetContentConfirmed(false)}
-                      className="flex-1 py-1.5 rounded-xl bg-[#101010] text-xs font-semibold text-[#9298A3] hover:text-white border border-[#20242C] cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onResetToFreshData();
-                        onClose();
-                      }}
-                      className="flex-1 py-1.5 rounded-xl bg-[#2166FF] hover:bg-[#1a55d6] text-xs text-white font-bold cursor-pointer"
-                    >
-                      Clear Content
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Delete Account Option (User Request 7) */}
+          {/* Delete Account Option */}
           {onDeleteAccount && (
             <div className="pt-1">
               {!deleteAccountConfirmed ? (
@@ -303,7 +300,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <span className="text-xs font-bold uppercase tracking-wider">Permanent Deletion</span>
                   </div>
                   <p className="text-[11px] text-red-200 text-center leading-relaxed">
-                    This will permanently delete your account, posts, daily check-in proofs, and personal data. This cannot be undone.
+                    This will permanently delete your account, posts, credits, comments, challenge and community activity, and personal data. This cannot be undone.
                   </p>
                   <div className="flex gap-2 pt-1">
                     <button

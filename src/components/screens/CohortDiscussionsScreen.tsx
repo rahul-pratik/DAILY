@@ -18,12 +18,14 @@ import {
   Maximize2,
   Bell,
   BellOff,
-  Trash2
+  Trash2,
+  Crop
 } from 'lucide-react';
 import { Author, Challenge, CohortProof } from '../../types';
 import { getSafeUUID } from '../../lib/supabase';
 import { CreditIcon } from '../CreditIcon';
 import { StorageService } from '../../services/storageService';
+import { ImageCropModal } from '../modals/ImageCropModal';
 
 interface CohortDiscussionsScreenProps {
   challenge: Challenge;
@@ -31,6 +33,7 @@ interface CohortDiscussionsScreenProps {
   currentUser: Author;
   initialViewMode?: 'list' | 'detail';
   onBack: () => void;
+  onViewModeChange?: (mode: 'list' | 'detail') => void;
   onSelectChallengeCohort?: (challenge: Challenge) => void;
   onNavigateUser?: (user: { name: string; username: string }) => void;
   onToggleFollow?: (userId: string) => void;
@@ -49,6 +52,7 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
   currentUser,
   initialViewMode = 'list',
   onBack,
+  onViewModeChange,
   onSelectChallengeCohort,
   onNavigateUser,
   onToggleFollow,
@@ -60,6 +64,11 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
   const [viewMode, setViewMode] = useState<'list' | 'detail'>(initialViewMode);
   const [isCohortMuted, setIsCohortMuted] = useState<boolean>(() => StorageService.isChallengeMuted(challenge.id));
 
+  const changeViewMode = (nextMode: 'list' | 'detail') => {
+    setViewMode(nextMode);
+    onViewModeChange?.(nextMode);
+  };
+
   useEffect(() => {
     setIsCohortMuted(StorageService.isChallengeMuted(selectedCohort.id));
   }, [selectedCohort.id]);
@@ -68,6 +77,8 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
   const [proofNote, setProofNote] = useState('');
   const [selectedProofPhoto, setSelectedProofPhoto] = useState<string | null>(null);
   const [proofPhotoName, setProofPhotoName] = useState<string>('');
+  const [rawImageToCrop, setRawImageToCrop] = useState<string>('');
+  const [isCropModalOpen, setIsCropModalOpen] = useState(false);
   
   // Real file input ref
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -110,7 +121,7 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
     ? challenges.filter((c) => c.joined || c.type === 'squad')
     : [challenge];
 
-  // Handle Real File Selection
+  // Handle Real File Selection -> opens Crop Modal
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -119,10 +130,12 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
     const reader = new FileReader();
     reader.onloadend = () => {
       if (typeof reader.result === 'string') {
-        setSelectedProofPhoto(reader.result);
+        setRawImageToCrop(reader.result);
+        setIsCropModalOpen(true);
       }
     };
     reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const handleToggleLikeProof = (id: string) => {
@@ -259,8 +272,9 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
                 key={cohort.id}
                 onClick={() => {
                   setSelectedCohort(cohort);
+                  onSelectChallengeCohort?.(cohort);
                   if (cohort.type === 'solo') setFeedFilter('all');
-                  setViewMode('detail');
+                  changeViewMode('detail');
                 }}
                 className="p-4 rounded-3xl bg-[#080B10] hover:bg-[#101010] border border-[#20242C] hover:border-[#2166FF]/40 transition-all cursor-pointer flex items-center justify-between gap-3 group"
               >
@@ -307,29 +321,29 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
       <div className="flex items-center justify-between pb-3 pt-1 border-b border-[#20242C]/70 mb-4">
         <div className="flex items-center gap-2.5 min-w-0">
           <button
-            onClick={() => setViewMode('list')}
+            onClick={() => changeViewMode('list')}
             className="w-9 h-9 rounded-full bg-[#101010] hover:bg-[#1f242e] border border-[#20242C] flex items-center justify-center text-[#9298A3] hover:text-white transition-colors cursor-pointer shrink-0"
             aria-label="Back"
           >
             <ArrowLeft size={18} />
           </button>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h1 className="text-base font-bold text-white truncate">
                 {selectedCohort.title} Cohort
               </h1>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase shrink-0 ${
                 isSquadChallenge ? 'bg-[#2166FF]/20 text-[#3B82FF] border border-[#2166FF]/30' : 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
               }`}>
                 {isSquadChallenge ? 'Squad' : 'Solo'}
               </span>
             </div>
-            <p className="text-xs text-[#9298A3] flex items-center gap-1.5 font-mono">
+            <p className="text-xs text-[#9298A3] flex items-center gap-1.5 font-mono truncate">
               <span className="text-emerald-400 font-medium">
                 Day {effectiveCurrentDay} of {selectedCohort.target}
               </span>
               <span>•</span>
-              <span>{isSquadChallenge ? `${selectedCohort.participantsCount ?? selectedCohort.squadMembers?.length ?? 0} Squad Members` : 'Solo Participant'}</span>
+              <span className="truncate">{isSquadChallenge ? `${selectedCohort.participantsCount ?? selectedCohort.squadMembers?.length ?? 0} Squad Members` : 'Solo Participant'}</span>
             </p>
           </div>
         </div>
@@ -351,14 +365,6 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
           >
             {isCohortMuted ? <BellOff size={13} /> : <Bell size={13} />}
             <span>{isCohortMuted ? 'Muted' : 'Mute'}</span>
-          </button>
-
-          {/* Switch cohort button */}
-          <button
-            onClick={() => setViewMode('list')}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#101010] hover:bg-[#1f242e] border border-[#20242C] text-[#9298A3] hover:text-white transition-colors cursor-pointer"
-          >
-            <span>Back to list</span>
           </button>
         </div>
       </div>
@@ -402,19 +408,33 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
                 <Check size={12} className="stroke-[3]" /> Photo Attached: Ready to Post Evidence
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedProofPhoto(null);
-                setProofPhotoName('');
-                if (fileInputRef.current) fileInputRef.current.value = '';
-              }}
-              className="px-2 py-1 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-300 text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1"
-              title="Remove photo"
-            >
-              <X size={12} />
-              <span>Remove</span>
-            </button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setRawImageToCrop(selectedProofPhoto);
+                  setIsCropModalOpen(true);
+                }}
+                className="px-2 py-1 rounded-xl bg-[#2166FF]/15 hover:bg-[#2166FF]/25 border border-[#2166FF]/35 text-[#3B82FF] text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1"
+                title="Crop photo"
+              >
+                <Crop size={12} />
+                <span>Crop</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedProofPhoto(null);
+                  setProofPhotoName('');
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                }}
+                className="px-2 py-1 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-300 text-[11px] font-medium transition-colors cursor-pointer flex items-center gap-1"
+                title="Remove photo"
+              >
+                <X size={12} />
+                <span>Remove</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -712,6 +732,20 @@ export const CohortDiscussionsScreen: React.FC<CohortDiscussionsScreenProps> = (
             </div>
           </div>
         </div>
+      )}
+
+      {isCropModalOpen && (
+        <ImageCropModal
+          isOpen={isCropModalOpen}
+          imageUrl={rawImageToCrop}
+          mode="square"
+          title="Crop Photo"
+          onCropComplete={(croppedDataUrl) => {
+            setSelectedProofPhoto(croppedDataUrl);
+            setIsCropModalOpen(false);
+          }}
+          onClose={() => setIsCropModalOpen(false)}
+        />
       )}
     </div>
   );

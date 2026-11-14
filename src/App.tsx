@@ -29,8 +29,9 @@ import { PostMenuModal } from './components/modals/PostMenuModal';
 import { CreateChallengeModal } from './components/modals/CreateChallengeModal';
 import { CreateCommunityModal } from './components/modals/CreateCommunityModal';
 import { ShareModal } from './components/modals/ShareModal';
-import { OnboardingAuthScreen } from './components/screens/OnboardingAuthScreen';
-import { StorageService } from './services/storageService';
+import { AccountSwitcherModal } from './components/modals/AccountSwitcherModal';
+import { OnboardingAuthScreen, OnboardingStep } from './components/screens/OnboardingAuthScreen';
+import { SavedAccount, StorageService } from './services/storageService';
 import { supabase, isValidUUID, getSafeUUID, toDeterministicUUID, syncProfileToSupabase, uploadMediaToSupabase } from './lib/supabase';
 import { Smartphone, Monitor, Columns } from 'lucide-react';
 
@@ -59,6 +60,23 @@ export default function App() {
   const [userBeforeSearchNavigation, setUserBeforeSearchNavigation] = useState<Author | null>(null);
   const [isCurrentPostModerator, setIsCurrentPostModerator] = useState<boolean>(false);
   const [isOnboardingDone, setIsOnboardingDone] = useState<boolean>(StorageService.isOnboardingCompleted());
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => StorageService.getTheme());
+  const [savedAccounts, setSavedAccounts] = useState<SavedAccount[]>(() => StorageService.getSavedAccounts());
+  const [isAccountSwitcherOpen, setIsAccountSwitcherOpen] = useState<boolean>(false);
+  const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>('welcome');
+  const [onboardingAuthMode, setOnboardingAuthMode] = useState<'signup' | 'login'>('signup');
+  const [skipOnboardingAutoRedirect, setSkipOnboardingAutoRedirect] = useState<boolean>(false);
+  const [accountBeforeAuthRedirect, setAccountBeforeAuthRedirect] = useState<{
+    user: Author;
+    authSession: { provider: 'google' | 'email' | 'guest'; email?: string } | null;
+  } | null>(null);
+  const suppressSignOutRedirectRef = React.useRef<boolean>(false);
+  const screenHistoryRef = React.useRef<ScreenType[]>([]);
+  const isPopStateNavRef = React.useRef<boolean>(false);
+  const pushedHistoryDepthRef = React.useRef<number>(0);
+  const ignorePopCountRef = React.useRef<number>(0);
+  const navTrailRef = React.useRef<string[]>([]);
+  const handleHardwareBackRef = React.useRef<() => void>(() => {});
 
   // Application Data States (persisted via StorageService or fetched from Supabase)
   const [currentUser, setCurrentUser] = useState<Author>(() => StorageService.getCurrentUser() ?? defaultGuestUser);
@@ -134,6 +152,37 @@ export default function App() {
 
   // Desktop display mode toggle: 'app' (framed mobile view) vs 'fluid' vs 'board' (5-screens showcase)
   const [displayMode, setDisplayMode] = useState<'app' | 'fluid' | 'board'>('app');
+
+  // Apply Dark / Light theme classes across document root & persist choice
+  React.useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'light') {
+      root.classList.add('light');
+      root.classList.remove('dark');
+    } else {
+      root.classList.add('dark');
+      root.classList.remove('light');
+    }
+    root.style.colorScheme = theme;
+    StorageService.setTheme(theme);
+  }, [theme]);
+
+  const recordSavedAccount = React.useCallback((
+    userObj: Author,
+    authSessionObj?: { provider: 'google' | 'email' | 'guest'; email?: string } | null,
+    accessToken?: string,
+    refreshToken?: string
+  ) => {
+    if (!userObj || (userObj.username === 'builder' && !userObj.id)) return;
+    const next = StorageService.upsertSavedAccount({
+      user: userObj,
+      authSession: authSessionObj || StorageService.getAuthSession() || { provider: 'email' },
+      accessToken,
+      refreshToken,
+      lastActiveAt: new Date().toISOString(),
+    });
+    setSavedAccounts(next);
+  }, []);
 
   // Sync all mutated state to StorageService for real data feeding & persistence
   React.useEffect(() => {
@@ -939,13 +988,14 @@ export default function App() {
           isCurrentUser: true,
         };
 
+        const authSessionPayload = {
+          provider: ((u.app_metadata?.provider as any) || 'email') as 'google' | 'email' | 'guest',
+          email: u.email,
+        };
         setCurrentUser(authUser);
         setViewingUser(authUser);
         StorageService.saveCurrentUser(authUser);
-        StorageService.setAuthSession({
-          provider: (u.app_metadata?.provider as any) || 'email',
-          email: u.email,
-        });
+        StorageService.setAuthSession(authSessionPayload);
 
         // If user already completed onboarding and has an established profile, load main app
         const hasExistingAccount = Boolean(
@@ -954,6 +1004,7 @@ export default function App() {
           dbProfile?.username !== 'builder'
         );
         if (hasExistingAccount) {
+          recordSavedAccount(authUser, authSessionPayload, session.access_token, session.refresh_token);
           StorageService.setOnboardingCompleted(true);
           setIsOnboardingDone(true);
           fetchSupabaseData(u.id);
@@ -961,11 +1012,17 @@ export default function App() {
           StorageService.setOnboardingCompleted(false);
           setIsOnboardingDone(false);
         }
+      } else if (StorageService.isOnboardingCompleted()) {
+        const storedUser = StorageService.getCurrentUser();
+        if (storedUser && (storedUser.id || storedUser.username !== 'builder')) {
+          recordSavedAccount(storedUser, StorageService.getAuthSession());
+        }
       }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user) {
+        if (suppressSignOutRedirectRef.current) return;
         const u = session.user;
         const meta = u.user_metadata || {};
 
@@ -993,13 +1050,14 @@ export default function App() {
           isCurrentUser: true,
         };
 
+        const authSessionPayload = {
+          provider: ((u.app_metadata?.provider as any) || 'email') as 'google' | 'email' | 'guest',
+          email: u.email,
+        };
         setCurrentUser(authUser);
         setViewingUser(authUser);
         StorageService.saveCurrentUser(authUser);
-        StorageService.setAuthSession({
-          provider: (u.app_metadata?.provider as any) || 'email',
-          email: u.email,
-        });
+        StorageService.setAuthSession(authSessionPayload);
 
         const hasExistingAccount = Boolean(
           (meta.onboarding_completed || dbProfile?.onboarding_completed) &&
@@ -1007,6 +1065,7 @@ export default function App() {
           dbProfile?.username !== 'builder'
         );
         if (hasExistingAccount) {
+          recordSavedAccount(authUser, authSessionPayload, session.access_token, session.refresh_token);
           StorageService.setOnboardingCompleted(true);
           setIsOnboardingDone(true);
           fetchSupabaseData(u.id);
@@ -1015,6 +1074,7 @@ export default function App() {
           setIsOnboardingDone(false);
         }
       } else if (event === 'SIGNED_OUT') {
+        if (suppressSignOutRedirectRef.current) return;
         StorageService.setOnboardingCompleted(false);
         setIsOnboardingDone(false);
       }
@@ -1229,49 +1289,432 @@ export default function App() {
   }, []);
 
   const handleSignOut = async () => {
+    setSavedAccounts(StorageService.removeSavedAccount(currentUser.id, currentUser.username));
     try {
-      await supabase.auth.signOut();
-    } catch (err) {
+      suppressSignOutRedirectRef.current = true;
+      await supabase.auth.signOut({ scope: 'local' });
+    } catch {
       // ignore
+    } finally {
+      suppressSignOutRedirectRef.current = false;
     }
     StorageService.setOnboardingCompleted(false);
     StorageService.setAuthSession({ provider: 'guest' });
+    setAccountBeforeAuthRedirect(null);
+    setOnboardingStep('welcome');
+    setOnboardingAuthMode('signup');
+    setSkipOnboardingAutoRedirect(true);
     setIsOnboardingDone(false);
     showToast('Signed out of account session');
   };
 
-  const handleLogIn = () => {
+  const handleLogIn = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentAuthSession = StorageService.getAuthSession();
+      if (currentUser && (currentUser.id || currentUser.username !== 'builder')) {
+        recordSavedAccount(
+          currentUser,
+          currentAuthSession || { provider: session?.user ? 'email' : 'guest', email: session?.user?.email },
+          session?.access_token,
+          session?.refresh_token
+        );
+      }
+      setAccountBeforeAuthRedirect({ user: currentUser, authSession: currentAuthSession });
+      if (session) {
+        suppressSignOutRedirectRef.current = true;
+        await supabase.auth.signOut({ scope: 'local' });
+      }
+    } catch {
+      // ignore
+    } finally {
+      suppressSignOutRedirectRef.current = false;
+    }
     setIsSettingsOpen(false);
+    setIsAccountSwitcherOpen(false);
+    setOnboardingStep('auth');
+    setOnboardingAuthMode('login');
+    setSkipOnboardingAutoRedirect(true);
     setIsOnboardingDone(false);
   };
 
-  const handleDeleteAccount = async () => {
+  const handleCancelAddAccount = async () => {
+    const prev = accountBeforeAuthRedirect;
+    setAccountBeforeAuthRedirect(null);
+    setSkipOnboardingAutoRedirect(false);
+    if (!prev) {
+      setOnboardingStep('welcome');
+      return;
+    }
+    const savedMatch = StorageService.getSavedAccounts().find((acc) =>
+      (prev.user.id && acc.user.id === prev.user.id) ||
+      (prev.user.username && acc.user.username?.toLowerCase() === prev.user.username.toLowerCase())
+    );
+    if (savedMatch?.accessToken && savedMatch?.refreshToken) {
+      try {
+        suppressSignOutRedirectRef.current = true;
+        await supabase.auth.setSession({
+          access_token: savedMatch.accessToken,
+          refresh_token: savedMatch.refreshToken,
+        });
+      } catch {
+        // ignore
+      } finally {
+        suppressSignOutRedirectRef.current = false;
+      }
+    }
+    setCurrentUser(prev.user);
+    setViewingUser(prev.user);
+    StorageService.saveCurrentUser(prev.user);
+    StorageService.setAuthSession(prev.authSession);
+    StorageService.setOnboardingCompleted(true);
+    setIsOnboardingDone(true);
+  };
+
+  const handleSwitchAccount = async (targetAccount: SavedAccount) => {
     try {
-      const activeUserId = await getActiveAuthUserId();
-      if (activeUserId && isValidUUID(activeUserId)) {
-        await Promise.allSettled([
-          supabase.from('post_likes').delete().eq('user_id', activeUserId),
-          supabase.from('post_bookmarks').delete().eq('user_id', activeUserId),
-          supabase.from('post_comments').delete().eq('author_id', activeUserId),
-          supabase.from('cohort_proofs').delete().eq('author_id', activeUserId),
-          supabase.from('challenge_participants').delete().eq('user_id', activeUserId),
-          supabase.from('community_members').delete().eq('user_id', activeUserId),
-          supabase.from('todos').delete().eq('user_id', activeUserId),
-          supabase.from('posts').delete().eq('author_id', activeUserId),
-          supabase.from('profiles').delete().eq('id', activeUserId),
+      const { data: { session } } = await supabase.auth.getSession();
+      const currentAuthSession = StorageService.getAuthSession();
+      if (currentUser && (currentUser.id || currentUser.username !== 'builder')) {
+        recordSavedAccount(
+          currentUser,
+          currentAuthSession || { provider: session?.user ? 'email' : 'guest', email: session?.user?.email },
+          session?.access_token,
+          session?.refresh_token
+        );
+      }
+    } catch {
+      // ignore
+    }
+
+    const nextUser: Author = { ...targetAccount.user, isCurrentUser: true };
+    setCurrentUser(nextUser);
+    setViewingUser(nextUser);
+    setAccountabilityHubUser(nextUser);
+    StorageService.saveCurrentUser(nextUser);
+    StorageService.setAuthSession(targetAccount.authSession || { provider: 'email' });
+    StorageService.setOnboardingCompleted(true);
+    setAccountBeforeAuthRedirect(null);
+    setSkipOnboardingAutoRedirect(false);
+    setIsOnboardingDone(true);
+    setIsAccountSwitcherOpen(false);
+    setIsSettingsOpen(false);
+
+    if (targetAccount.accessToken && targetAccount.refreshToken) {
+      try {
+        suppressSignOutRedirectRef.current = true;
+        await supabase.auth.setSession({
+          access_token: targetAccount.accessToken,
+          refresh_token: targetAccount.refreshToken,
+        });
+      } catch (err) {
+        console.warn('Supabase session restore notice:', err);
+      } finally {
+        suppressSignOutRedirectRef.current = false;
+      }
+    }
+
+    if (isValidUUID(nextUser.id)) {
+      void fetchSupabaseData(nextUser.id);
+    }
+    showToast(`Switched to @${nextUser.username}`);
+  };
+
+  const handleLongPressProfile = () => {
+    const latest = StorageService.getSavedAccounts();
+    setSavedAccounts(latest);
+    const others = latest.filter((acc) => {
+      const sameId = Boolean(currentUser?.id && acc.user.id && acc.user.id === currentUser.id);
+      const sameUsername = Boolean(
+        currentUser?.username &&
+        acc.user.username &&
+        acc.user.username.toLowerCase() === currentUser.username.toLowerCase()
+      );
+      return !sameId && !sameUsername;
+    });
+    if (others.length === 0) {
+      showToast('Add another account to switch');
+    }
+    setIsAccountSwitcherOpen(true);
+  };
+
+  const handleDeleteAccount = async () => {
+    const deletedUserId = currentUser.id;
+    const deletedUsername = (currentUser.username || '').toLowerCase().replace(/^@/, '');
+    const isDeletedAuthor = (u?: { id?: string; username?: string } | null) =>
+      Boolean(
+        u && (
+          (deletedUserId && u.id && u.id === deletedUserId) ||
+          (deletedUsername && u.username && u.username.toLowerCase().replace(/^@/, '') === deletedUsername)
+        )
+      );
+
+    let remoteActiveId: string | undefined;
+    const remoteCreditedPostIds = new Set<string>();
+    const remoteFollowedUserIds = new Set<string>();
+    let ownedSquadIds: string[] = [];
+
+    try {
+      remoteActiveId = await getActiveAuthUserId();
+      const targetUuid = (remoteActiveId && isValidUUID(remoteActiveId))
+        ? remoteActiveId
+        : (isValidUUID(deletedUserId) ? deletedUserId : undefined);
+
+      if (targetUuid) {
+        const [userCreditsRes, userFollowsRes, ownedSquadsRes] = await Promise.all([
+          supabase.from('post_credits').select('post_id, vote_type').eq('user_id', targetUuid),
+          supabase.from('follows').select('following_id').eq('follower_id', targetUuid),
+          supabase.from('squads').select('id').eq('creator_id', targetUuid),
         ]);
-        await supabase.auth.signOut();
+
+        ((userCreditsRes.data as any[]) || []).forEach((row) => {
+          if (row.vote_type === 'credit' && row.post_id) remoteCreditedPostIds.add(row.post_id);
+        });
+        ((userFollowsRes.data as any[]) || []).forEach((row) => {
+          if (row.following_id) remoteFollowedUserIds.add(row.following_id);
+        });
+        ownedSquadIds = ((ownedSquadsRes.data as any[]) || []).map((s) => s.id).filter(Boolean);
+
+        // Delete all interactions & contributions (DB triggers automatically recalculate post_credits & post_comments on others' posts)
+        const childDeletes: PromiseLike<any>[] = [
+          supabase.from('post_credits').delete().eq('user_id', targetUuid),
+          supabase.from('post_likes').delete().eq('user_id', targetUuid),
+          supabase.from('post_bookmarks').delete().eq('user_id', targetUuid),
+          supabase.from('post_comments').delete().eq('author_id', targetUuid),
+          supabase.from('message_reactions').delete().eq('user_id', targetUuid),
+          supabase.from('squad_chat_messages').delete().eq('sender_id', targetUuid),
+          supabase.from('squad_members').delete().eq('user_id', targetUuid),
+          supabase.from('cohort_proofs').delete().eq('author_id', targetUuid),
+          supabase.from('challenge_participants').delete().eq('user_id', targetUuid),
+          supabase.from('community_members').delete().eq('user_id', targetUuid),
+          supabase.from('follows').delete().eq('follower_id', targetUuid),
+          supabase.from('follows').delete().eq('following_id', targetUuid),
+          supabase.from('notifications').delete().eq('sender_id', targetUuid),
+          supabase.from('notifications').delete().eq('recipient_id', targetUuid),
+          supabase.from('todos').delete().eq('user_id', targetUuid),
+        ];
+
+        if (ownedSquadIds.length > 0) {
+          childDeletes.push(
+            supabase.from('squad_chat_messages').delete().in('squad_id', ownedSquadIds),
+            supabase.from('squad_members').delete().in('squad_id', ownedSquadIds)
+          );
+        }
+
+        await Promise.allSettled(childDeletes);
+
+        // Delete parent content owned by the user
+        await Promise.allSettled([
+          supabase.from('squads').delete().eq('creator_id', targetUuid),
+          supabase.from('posts').delete().eq('author_id', targetUuid),
+          supabase.from('challenges').delete().eq('creator_id', targetUuid),
+          supabase.from('communities').delete().eq('creator_id', targetUuid),
+        ]);
+
+        // Finally remove the profile record & end session
+        await supabase.from('profiles').delete().eq('id', targetUuid);
+        suppressSignOutRedirectRef.current = true;
+        await supabase.auth.signOut({ scope: 'local' });
       }
     } catch (err) {
       console.warn('Account deletion remote cleanup notice:', err);
+    } finally {
+      suppressSignOutRedirectRef.current = false;
     }
-    StorageService.clearAll();
+
+    // Gather local credit/vote & follow records left by the deleted account on others' content
+    const localCredits = new Set([
+      ...StorageService.getUserCredits(deletedUserId),
+      ...StorageService.getUserLikes(deletedUserId),
+    ]);
+    const localVotes = StorageService.getCommunityVotes(deletedUserId);
+    const localFollows = new Set([
+      ...StorageService.getUserFollows(deletedUserId),
+      ...Array.from(remoteFollowedUserIds),
+    ]);
+
+    const removedCommentCountsByPostId = new Map<string, number>();
+
+    // Clean Posts (remove deleted user's posts AND purge their comments & credits from others' posts)
+    const cleanedPosts = posts
+      .filter((p) => !isDeletedAuthor(p.author))
+      .map((p) => {
+        const prevComments = p.comments || [];
+        const remainingComments = prevComments.filter((c) => !isDeletedAuthor(c.author));
+        const removedComments = prevComments.length - remainingComments.length;
+        if (removedComments > 0) {
+          removedCommentCountsByPostId.set(p.id, removedComments);
+        }
+
+        const hadCredit =
+          remoteCreditedPostIds.has(p.id) ||
+          localVotes[p.id] === 'credit' ||
+          localCredits.has(p.id) ||
+          p.userVote === 'credit' ||
+          p.isLiked;
+
+        const baseCredits = p.creditsCount ?? p.likesCount ?? 0;
+        const nextCredits = hadCredit ? Math.max(0, baseCredits - 1) : baseCredits;
+
+        return {
+          ...p,
+          comments: remainingComments,
+          commentsCount: Math.max(remainingComments.length, Math.max(0, (p.commentsCount || 0) - removedComments)),
+          creditsCount: nextCredits,
+          likesCount: nextCredits,
+          isLiked: false,
+          userVote: null,
+        };
+      });
+    setPosts(cleanedPosts);
+    StorageService.savePosts(cleanedPosts);
+
+    // Clean Community Posts (remove deleted user's community posts, credits, and comment counts)
+    const cleanedCommunityPosts = communityPosts
+      .filter((cp) => !isDeletedAuthor(cp.author))
+      .map((cp) => {
+        const hadUpvote =
+          remoteCreditedPostIds.has(cp.id) ||
+          localVotes[cp.id] === 'credit' ||
+          cp.userVote === 'up';
+        const removedComments = removedCommentCountsByPostId.get(cp.id) || 0;
+        const nextUpvotes = hadUpvote ? Math.max(0, (cp.upvotes || 0) - 1) : cp.upvotes;
+        return {
+          ...cp,
+          upvotes: nextUpvotes,
+          credits: cp.credits !== undefined ? Math.max(0, cp.credits - (hadUpvote ? 1 : 0)) : cp.credits,
+          userVote: null,
+          commentsCount: Math.max(0, (cp.commentsCount || 0) - removedComments),
+        };
+      });
+    setCommunityPosts(cleanedCommunityPosts);
+    StorageService.saveCommunityPosts(cleanedCommunityPosts);
+
+    // Clean Challenges & Challenge Activity
+    const cleanedChallenges = challenges
+      .filter((ch) => !isDeletedAuthor(ch.creator))
+      .map((ch) => ({
+        ...ch,
+        joined: false,
+        current: 0,
+        participantsCount: ch.joined ? Math.max(0, (ch.participantsCount || 1) - 1) : ch.participantsCount,
+        squadProofs: (ch.squadProofs || []).filter((proof) => !isDeletedAuthor(proof.author)),
+        squadMembers: (ch.squadMembers || []).filter((member) => !isDeletedAuthor(member)),
+      }));
+    setChallenges(cleanedChallenges);
+    StorageService.saveChallenges(cleanedChallenges);
+
+    // Clean Communities & Community Activity
+    const cleanedCommunities = communities
+      .filter((cm) => !isDeletedAuthor(cm.creator))
+      .map((cm) => ({
+        ...cm,
+        isJoined: false,
+        membersCount: cm.isJoined ? Math.max(0, cm.membersCount - 1) : cm.membersCount,
+        moderators: (cm.moderators || []).filter((m) => !isDeletedAuthor(m)),
+        pendingJoinRequests: (cm.pendingJoinRequests || []).filter((req) => !isDeletedAuthor(req.user)),
+      }));
+    setCommunities(cleanedCommunities);
+    StorageService.saveCommunities(cleanedCommunities);
+
+    // Clean Squads & Squad Chat Messages
+    const removedSquadIds = new Set(
+      squads
+        .filter((sq) => isDeletedAuthor(sq.creator) || ownedSquadIds.includes(sq.id))
+        .map((sq) => sq.id)
+    );
+    removedSquadIds.forEach((sqId) => StorageService.addDeletedSquadId(sqId));
+    const cleanedSquads = squads
+      .filter((sq) => !removedSquadIds.has(sq.id))
+      .map((sq) => {
+        const remainingMembers = (sq.members || []).filter((m) => !isDeletedAuthor(m));
+        StorageService.saveSquadChatMessages(
+          sq.id,
+          StorageService.getSquadChatMessages(sq.id)
+            .filter((msg: any) => !isDeletedAuthor(msg.author || msg.sender))
+            .map((msg: any) => ({
+              ...msg,
+              reactions: (msg.reactions || [])
+                .map((r: any) => {
+                  const users = (r.users || []).filter(
+                    (u: string) => u !== deletedUserId && u.toLowerCase() !== deletedUsername
+                  );
+                  return { ...r, users, count: users.length };
+                })
+                .filter((r: any) => r.count > 0),
+            }))
+        );
+        return { ...sq, members: remainingMembers };
+      });
+    setSquads(cleanedSquads);
+    StorageService.saveSquads(cleanedSquads);
+    setSquadChatMessages((prev) =>
+      prev
+        .filter((m) => !removedSquadIds.has(m.squadId) && !isDeletedAuthor(m.author || m.sender))
+        .map((m) => ({
+          ...m,
+          reactions: (m.reactions || [])
+            .map((r) => {
+              const users = (r.users || []).filter(
+                (u) => u !== deletedUserId && u.toLowerCase() !== deletedUsername
+              );
+              return { ...r, users, count: users.length };
+            })
+            .filter((r) => r.count > 0),
+        }))
+    );
+
+    // Clean Creators list (remove deleted user & decrement follower count if deleted user followed them)
+    const cleanedCreators = allCreators
+      .filter((c) => !isDeletedAuthor(c))
+      .map((c) => {
+        const wasFollowed = Boolean(
+          c.isFollowing ||
+          (c.id && localFollows.has(c.id)) ||
+          (c.username && localFollows.has(c.username))
+        );
+        return {
+          ...c,
+          isFollowing: false,
+          followersCount: wasFollowed ? Math.max(0, (c.followersCount || 0) - 1) : c.followersCount,
+        };
+      });
+    setAllCreators(cleanedCreators);
+    StorageService.saveCreators(cleanedCreators);
+
+    // Purge per-user contributions & registries, clear active user credentials, preserve remaining accounts if any
+    StorageService.purgeDeletedUserContributions(deletedUserId, deletedUsername);
+    setSavedAccounts(StorageService.getSavedAccounts());
+    setNotifications([]);
+    StorageService.saveNotifications([]);
+    setToDoList([]);
+    StorageService.saveTodos([]);
+    localStorage.removeItem('daily_app_current_user');
+    StorageService.setOnboardingCompleted(false);
+    StorageService.setAuthSession(null);
+
+    setAccountBeforeAuthRedirect(null);
+    setActiveChallenge(null);
+    setActiveCommunity(null);
+    setActiveSquadForChat(null);
+    setSelectedPostForComments(null);
+    setSelectedChallenge(null);
+    setSelectedPostForMenu(null);
+    setSelectedPostForShare(null);
+    setIsSearchOpen(false);
+    setIsNotificationsOpen(false);
+    setIsAccountSwitcherOpen(false);
+    setIsEditProfileOpen(false);
+    setIsSettingsOpen(false);
+
     setCurrentUser(defaultGuestUser);
     setViewingUser(defaultGuestUser);
     setAccountabilityHubUser(defaultGuestUser);
+    setOnboardingStep('welcome');
+    setOnboardingAuthMode('signup');
+    setSkipOnboardingAutoRedirect(true);
     setIsOnboardingDone(false);
-    setIsSettingsOpen(false);
-    showToast('Account permanently deleted.');
+    showToast('Account and all activity permanently deleted.');
   };
 
   const showToast = (msg: string) => {
@@ -1294,21 +1737,42 @@ export default function App() {
     showToast(`${action} saved on this device, but cloud sync failed.`);
   };
 
+  const goBackFromScreen = (defaultFallback: ScreenType) => {
+    const stack = screenHistoryRef.current;
+    if (stack.length > 0) {
+      const target = stack.pop()!;
+      const nextPrev = stack.length > 0 ? stack[stack.length - 1] : 'home';
+      setPreviousScreen(nextPrev);
+      if (target === 'profile') {
+        setViewingUser(currentUser);
+      }
+      setCurrentScreen(target);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    setCurrentScreen(defaultFallback);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   // Screen selection
   const handleSelectScreen = (screen: ScreenType) => {
     if (screen === 'create') {
+      screenHistoryRef.current.push(currentScreen);
       setPreviousScreen(currentScreen);
-    }
-    if (screen === 'profile') {
-      // Direct click on Profile tab opens current user's profile
-      setViewingUser(currentUser);
+    } else if (screen === 'home' || screen === 'challenges' || screen === 'communities' || screen === 'profile') {
+      screenHistoryRef.current = screen === 'home' ? [] : ['home'];
+      setPreviousScreen(screen === 'home' ? 'home' : 'home');
+      if (screen === 'profile') {
+        // Direct click on Profile tab opens current user's profile
+        setViewingUser(currentUser);
+      }
     }
     setCurrentScreen(screen);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleCloseCreate = () => {
-    setCurrentScreen(previousScreen === 'create' ? 'home' : previousScreen);
+    goBackFromScreen(previousScreen === 'create' ? 'home' : previousScreen);
   };
 
   // Navigate to any user's profile
@@ -1333,6 +1797,7 @@ export default function App() {
 
     if (isTargetSelf) {
       setViewingUser(currentUser);
+      screenHistoryRef.current.push(currentScreen);
       setPreviousScreen(currentScreen);
       setCurrentScreen('profile');
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1358,6 +1823,7 @@ export default function App() {
         };
 
     setViewingUser(targetUserObj);
+    screenHistoryRef.current.push(currentScreen);
     setPreviousScreen(currentScreen);
     setCurrentScreen('profile');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -3200,6 +3666,7 @@ export default function App() {
     setCurrentUser(updatedUser);
     setViewingUser(updatedUser);
     StorageService.saveCurrentUser(updatedUser);
+    recordSavedAccount(updatedUser, StorageService.getAuthSession());
 
     setPosts((prev) => {
       const updatedPosts = prev.map((p) => {
@@ -3776,6 +4243,7 @@ export default function App() {
 
   const handleOpenChallengeDetail = (challenge: Challenge) => {
     setActiveChallenge(challenge);
+    screenHistoryRef.current.push(currentScreen);
     setPreviousScreen(currentScreen);
     setCurrentScreen('challenge_detail');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -3788,6 +4256,7 @@ export default function App() {
     } else {
       setCohortViewMode('list');
     }
+    screenHistoryRef.current.push(currentScreen);
     setPreviousScreen(currentScreen);
     setCurrentScreen('cohort_discussions');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -3800,6 +4269,7 @@ export default function App() {
     } else {
       setSquadChatViewMode('list');
     }
+    screenHistoryRef.current.push(currentScreen);
     setPreviousScreen(currentScreen);
     setCurrentScreen('squad_chats');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -3809,11 +4279,11 @@ export default function App() {
     if (navigatedFromSearch) {
       setViewingUser(userBeforeSearchNavigation || currentUser);
       setNavigatedFromSearch(false);
-      setCurrentScreen(previousScreen);
+      goBackFromScreen(previousScreen === 'profile' ? 'home' : previousScreen);
       setIsSearchOpen(true);
       return;
     }
-    handleSelectScreen(previousScreen === 'profile' ? 'home' : previousScreen);
+    goBackFromScreen(previousScreen === 'profile' ? 'home' : previousScreen);
   };
 
   const handleToggleSquadReaction = async (squadId: string, messageId: string, emoji: string) => {
@@ -4051,12 +4521,14 @@ export default function App() {
 
   const handleOpenCommunityHub = (community: Community) => {
     setActiveCommunity(community);
+    screenHistoryRef.current.push(currentScreen);
     setPreviousScreen(currentScreen);
     setCurrentScreen('community_hub');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleOpenJoinedCommunities = () => {
+    screenHistoryRef.current.push(currentScreen);
     setPreviousScreen(currentScreen);
     setCurrentScreen('my_joined_communities');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -4064,6 +4536,7 @@ export default function App() {
 
   const handleOpenAccountabilityHub = (targetUser?: Author) => {
     setAccountabilityHubUser(targetUser || currentUser);
+    screenHistoryRef.current.push(currentScreen);
     setPreviousScreen(currentScreen);
     setCurrentScreen('accountability_hub');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -4157,18 +4630,34 @@ export default function App() {
     }
   };
 
-  const handleOnboardingComplete = (
+  const handleOnboardingComplete = async (
     newUser: Author,
     selectedInterests: string[],
     authSession?: { provider: 'google' | 'email' | 'guest'; email?: string }
   ) => {
+    let accessToken: string | undefined;
+    let refreshToken: string | undefined;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      accessToken = session?.access_token;
+      refreshToken = session?.refresh_token;
+    } catch {
+      // ignore
+    }
+
     setCurrentUser(newUser);
     setViewingUser(newUser);
+    setAccountabilityHubUser(newUser);
     StorageService.saveCurrentUser(newUser);
     StorageService.setOnboardingCompleted(true);
     if (authSession) {
       StorageService.setAuthSession(authSession);
     }
+    recordSavedAccount(newUser, authSession || { provider: 'email' }, accessToken, refreshToken);
+    setAccountBeforeAuthRedirect(null);
+    setSkipOnboardingAutoRedirect(false);
+    setOnboardingStep('welcome');
+    setOnboardingAuthMode('signup');
     setIsOnboardingDone(true);
 
     if (isValidUUID(newUser.id)) {
@@ -4178,29 +4667,191 @@ export default function App() {
     showToast(`Welcome, ${newUser.name}! Your account is ready.`);
   };
 
-  const handleResetToFreshData = () => {
-    StorageService.clearDemoContent();
-    const cleanUser: Author = {
-      ...currentUser,
-      followersCount: 0,
-      followingCount: 0,
-    };
-    setCurrentUser(cleanUser);
-    setViewingUser(cleanUser);
-    setAccountabilityHubUser(cleanUser);
-    setPosts([]);
-    setChallenges([]);
-    setCommunities([]);
-    setCommunityPosts([]);
-    setAllCreators([]);
-    setToDoList([]);
-    setNotifications([]);
-    setSquads([]);
-    setSquadChatMessages([]);
-    setActiveChallenge(null);
-    setActiveCommunity(null);
-    showToast('Local demo content cleared. Your account is still signed in.');
+  // Unified Hardware Phone Back Button (popstate) synchronization across all screens, sub-views, onboarding & modals
+  const activeModalKey = isAccountSwitcherOpen
+    ? 'modal:switcher'
+    : selectedPostForShare
+      ? `modal:share:${selectedPostForShare.id}`
+      : selectedPostForMenu
+        ? `modal:menu:${selectedPostForMenu.id}`
+        : isEditProfileOpen
+          ? 'modal:editProfile'
+          : isSettingsOpen
+            ? 'modal:settings'
+            : isCreateChallengeOpen
+              ? 'modal:createChallenge'
+              : isCreateCommunityOpen
+                ? 'modal:createCommunity'
+                : selectedChallenge
+                  ? `modal:challengeModal:${selectedChallenge.id}`
+                  : selectedPostForComments
+                    ? `modal:comments:${selectedPostForComments.id}`
+                    : isNotificationsOpen
+                      ? 'modal:notifications'
+                      : isSearchOpen
+                        ? 'modal:search'
+                        : '';
+
+  const baseNavKey = !isOnboardingDone
+    ? `ob:${onboardingStep}`
+    : currentScreen === 'cohort_discussions'
+      ? `main:cohort_discussions:${cohortViewMode}`
+      : currentScreen === 'squad_chats'
+        ? `main:squad_chats:${squadChatViewMode}`
+        : currentScreen === 'profile'
+          ? `main:profile:${viewingUser.id || viewingUser.username}`
+          : currentScreen === 'challenge_detail'
+            ? `main:challenge_detail:${activeChallenge?.id || ''}`
+            : currentScreen === 'community_hub'
+              ? `main:community_hub:${activeCommunity?.id || ''}`
+              : currentScreen === 'accountability_hub'
+                ? `main:accountability_hub:${accountabilityHubUser?.id || accountabilityHubUser?.username || ''}`
+                : `main:${currentScreen}`;
+
+  const navSignature = activeModalKey ? `${baseNavKey}|${activeModalKey}` : baseNavKey;
+
+  handleHardwareBackRef.current = () => {
+    if (!isOnboardingDone) {
+      if (onboardingStep === 'profile') {
+        setOnboardingStep('auth');
+        return;
+      }
+      if (onboardingStep === 'auth') {
+        if (accountBeforeAuthRedirect) {
+          void handleCancelAddAccount();
+        } else if (onboardingAuthMode === 'login') {
+          setOnboardingStep('welcome');
+        } else {
+          setOnboardingStep('terms');
+        }
+        return;
+      }
+      if (onboardingStep === 'terms') {
+        setOnboardingStep('welcome');
+        return;
+      }
+      return;
+    }
+
+    if (isAccountSwitcherOpen) { setIsAccountSwitcherOpen(false); return; }
+    if (selectedPostForShare) { setSelectedPostForShare(null); return; }
+    if (selectedPostForMenu) { setSelectedPostForMenu(null); return; }
+    if (isEditProfileOpen) { setIsEditProfileOpen(false); return; }
+    if (isSettingsOpen) { setIsSettingsOpen(false); return; }
+    if (isCreateChallengeOpen) { setIsCreateChallengeOpen(false); return; }
+    if (isCreateCommunityOpen) { setIsCreateCommunityOpen(false); return; }
+    if (selectedChallenge) { setSelectedChallenge(null); return; }
+    if (selectedPostForComments) { setSelectedPostForComments(null); return; }
+    if (isNotificationsOpen) { setIsNotificationsOpen(false); return; }
+    if (isSearchOpen) { setIsSearchOpen(false); return; }
+
+    if (currentScreen === 'cohort_discussions') {
+      if (cohortViewMode === 'detail') {
+        setCohortViewMode('list');
+      } else {
+        goBackFromScreen(previousScreen === 'cohort_discussions' ? 'challenges' : previousScreen);
+      }
+      return;
+    }
+    if (currentScreen === 'squad_chats') {
+      if (squadChatViewMode === 'detail') {
+        setSquadChatViewMode('list');
+      } else {
+        goBackFromScreen(previousScreen === 'squad_chats' ? 'challenges' : previousScreen);
+      }
+      return;
+    }
+    if (currentScreen === 'challenge_detail') {
+      goBackFromScreen(previousScreen === 'challenge_detail' ? 'challenges' : previousScreen);
+      return;
+    }
+    if (currentScreen === 'community_hub') {
+      goBackFromScreen(previousScreen === 'community_hub' ? 'communities' : previousScreen);
+      return;
+    }
+    if (currentScreen === 'accountability_hub') {
+      goBackFromScreen(previousScreen === 'accountability_hub' ? 'home' : previousScreen);
+      return;
+    }
+    if (currentScreen === 'my_joined_communities') {
+      goBackFromScreen(previousScreen === 'my_joined_communities' ? 'communities' : previousScreen);
+      return;
+    }
+    if (currentScreen === 'create') {
+      handleCloseCreate();
+      return;
+    }
+    if (currentScreen === 'profile') {
+      handleBackFromProfile();
+      return;
+    }
+    if (currentScreen !== 'home') {
+      handleSelectScreen('home');
+    }
   };
+
+  React.useEffect(() => {
+    const onPopState = () => {
+      if (ignorePopCountRef.current > 0) {
+        ignorePopCountRef.current -= 1;
+        return;
+      }
+      pushedHistoryDepthRef.current = Math.max(0, pushedHistoryDepthRef.current - 1);
+      isPopStateNavRef.current = true;
+      handleHardwareBackRef.current();
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  React.useEffect(() => {
+    if (navTrailRef.current.length === 0) {
+      navTrailRef.current = [navSignature];
+      return;
+    }
+
+    const trail = navTrailRef.current;
+    const lastKey = trail[trail.length - 1];
+    if (lastKey === navSignature) return;
+
+    if (isPopStateNavRef.current) {
+      isPopStateNavRef.current = false;
+      const prevIdx = trail.length >= 2 && trail[trail.length - 2] === navSignature ? trail.length - 2 : -1;
+      if (prevIdx >= 0) {
+        navTrailRef.current = trail.slice(0, prevIdx + 1);
+      } else {
+        navTrailRef.current = [...trail.slice(0, -1), navSignature];
+      }
+      return;
+    }
+
+    // Returning cleanly 1 step back via an in-app UI back button / close button: keep browser history aligned
+    if (trail.length >= 2 && trail[trail.length - 2] === navSignature) {
+      navTrailRef.current = trail.slice(0, trail.length - 1);
+      if (pushedHistoryDepthRef.current > 0) {
+        pushedHistoryDepthRef.current -= 1;
+        ignorePopCountRef.current += 1;
+        window.history.back();
+      }
+      return;
+    }
+
+    // Base landing screen reset (e.g. Home tab tapped from a nested tab)
+    if (navSignature === 'main:home' || navSignature === 'ob:welcome') {
+      if (pushedHistoryDepthRef.current > 0) {
+        const steps = pushedHistoryDepthRef.current;
+        pushedHistoryDepthRef.current = 0;
+        ignorePopCountRef.current += 1;
+        window.history.go(-steps);
+      }
+      navTrailRef.current = [navSignature];
+      return;
+    }
+
+    navTrailRef.current = [...trail, navSignature];
+    pushedHistoryDepthRef.current += 1;
+    window.history.pushState({ dailyNav: navSignature }, '');
+  }, [navSignature]);
 
   // Render current screen contents
   const renderScreenContent = (screen: ScreenType) => {
@@ -4313,7 +4964,7 @@ export default function App() {
             allChallenges={challenges}
             joinedCommunities={communities.filter((c) => c.isJoined)}
             allCommunities={communities}
-            onBack={() => handleSelectScreen(previousScreen === 'accountability_hub' ? 'home' : previousScreen)}
+            onBack={() => goBackFromScreen(previousScreen === 'accountability_hub' ? 'home' : previousScreen)}
             onToggleToDo={handleToggleToDo}
             onAddCustomToDo={handleAddCustomToDo}
             onDeleteToDo={handleDeleteToDo}
@@ -4330,7 +4981,7 @@ export default function App() {
             <div className="py-20 text-center px-4">
               <p className="text-sm font-semibold text-white mb-2">No Challenges Active</p>
               <button
-                onClick={() => handleSelectScreen('challenges')}
+                onClick={() => goBackFromScreen('challenges')}
                 className="px-4 py-2 rounded-xl bg-[#2166FF] text-white text-xs font-semibold cursor-pointer"
               >
                 Explore Challenges
@@ -4344,7 +4995,8 @@ export default function App() {
             challenges={challenges}
             currentUser={currentUser}
             initialViewMode={cohortViewMode}
-            onBack={() => handleSelectScreen(previousScreen === 'cohort_discussions' ? 'challenges' : previousScreen)}
+            onBack={() => goBackFromScreen(previousScreen === 'cohort_discussions' ? 'challenges' : previousScreen)}
+            onViewModeChange={setCohortViewMode}
             onSelectChallengeCohort={(ch) => setActiveChallenge(ch)}
             onNavigateUser={(user) => handleNavigateToUser(user)}
             onToggleFollow={handleToggleFollow}
@@ -4363,7 +5015,8 @@ export default function App() {
             initialSquad={activeSquadForChat}
             initialViewMode={squadChatViewMode}
             messages={squadChatMessages}
-            onBack={() => handleSelectScreen(previousScreen === 'squad_chats' ? 'challenges' : previousScreen)}
+            onBack={() => goBackFromScreen(previousScreen === 'squad_chats' ? 'challenges' : previousScreen)}
+            onViewModeChange={setSquadChatViewMode}
             onSendMessage={handleSendSquadMessage}
             onToggleReaction={handleToggleSquadReaction}
             onMarkMessagesAsRead={handleMarkSquadMessagesAsRead}
@@ -4389,7 +5042,7 @@ export default function App() {
           <CommunityHubScreen
             community={targetCommunity}
             currentUser={currentUser}
-            onBack={() => handleSelectScreen(previousScreen === 'community_hub' ? 'communities' : previousScreen)}
+            onBack={() => goBackFromScreen(previousScreen === 'community_hub' ? 'communities' : previousScreen)}
             onNavigateUser={(user) => handleNavigateToUser(user)}
             onToggleFollow={handleToggleFollow}
             onUpdateGuidelines={handleUpdateCommunityGuidelines}
@@ -4416,7 +5069,7 @@ export default function App() {
             <div className="py-20 text-center px-4">
               <p className="text-sm font-semibold text-white mb-2">Challenge Not Found</p>
               <button
-                onClick={() => handleSelectScreen('challenges')}
+                onClick={() => goBackFromScreen('challenges')}
                 className="px-4 py-2 rounded-xl bg-[#2166FF] text-white text-xs font-semibold cursor-pointer"
               >
                 Back to Challenges
@@ -4428,9 +5081,8 @@ export default function App() {
           <ChallengeDetailScreen
             challenge={targetCh}
             currentUser={currentUser}
-            onBack={() => handleSelectScreen(previousScreen === 'challenge_detail' ? 'challenges' : previousScreen)}
+            onBack={() => goBackFromScreen(previousScreen === 'challenge_detail' ? 'challenges' : previousScreen)}
             onCheckInWithProof={handleCheckInWithProof}
-            onQuickCheckIn={handleIncrementChallenge}
             onAddToTodoList={handleAddToTodoList}
             onOpenCohortChat={() => handleOpenCohortDiscussions(targetCh)}
             onToggleJoin={handleToggleJoinChallenge}
@@ -4444,7 +5096,7 @@ export default function App() {
         return (
           <JoinedCommunitiesScreen
             communities={communities}
-            onBack={() => handleSelectScreen(previousScreen === 'my_joined_communities' ? 'communities' : previousScreen)}
+            onBack={() => goBackFromScreen(previousScreen === 'my_joined_communities' ? 'communities' : previousScreen)}
             onSelectCommunity={(comm) => handleOpenCommunityHub(comm)}
             onExploreMore={() => handleSelectScreen('communities')}
           />
@@ -4459,8 +5111,13 @@ export default function App() {
     return (
       <OnboardingAuthScreen
         onComplete={handleOnboardingComplete}
-        initialUser={currentUser}
+        initialUser={onboardingAuthMode === 'login' ? undefined : currentUser}
         allCommunities={communities}
+        initialStep={onboardingStep}
+        initialAuthMode={onboardingAuthMode}
+        skipAutoRedirect={skipOnboardingAutoRedirect}
+        onStepChange={setOnboardingStep}
+        onCancelLogin={accountBeforeAuthRedirect ? handleCancelAddAccount : undefined}
       />
     );
   }
@@ -4546,6 +5203,7 @@ export default function App() {
                     onOpenSettings={() => setIsSettingsOpen(true)}
                     onOpenNotifications={() => setIsNotificationsOpen(true)}
                     onNavigateProfile={() => handleSelectScreen('profile')}
+                    onLongPressProfile={handleLongPressProfile}
                     onOpenAccountabilityHub={handleOpenAccountabilityHub}
                   />
                   <div className="flex-1 overflow-y-auto no-scrollbar">
@@ -4571,6 +5229,7 @@ export default function App() {
                     onOpenSettings={() => setIsSettingsOpen(true)}
                     onOpenNotifications={() => setIsNotificationsOpen(true)}
                     onNavigateProfile={() => handleSelectScreen('profile')}
+                    onLongPressProfile={handleLongPressProfile}
                     onOpenAccountabilityHub={handleOpenAccountabilityHub}
                   />
                   <div className="flex-1 overflow-y-auto no-scrollbar">
@@ -4608,6 +5267,7 @@ export default function App() {
                     onOpenSettings={() => setIsSettingsOpen(true)}
                     onOpenNotifications={() => setIsNotificationsOpen(true)}
                     onNavigateProfile={() => handleSelectScreen('profile')}
+                    onLongPressProfile={handleLongPressProfile}
                     onOpenAccountabilityHub={handleOpenAccountabilityHub}
                   />
                   <div className="flex-1 overflow-y-auto no-scrollbar">
@@ -4633,6 +5293,7 @@ export default function App() {
                     onOpenSettings={() => setIsSettingsOpen(true)}
                     onOpenNotifications={() => setIsNotificationsOpen(true)}
                     onNavigateProfile={() => handleSelectScreen('profile')}
+                    onLongPressProfile={handleLongPressProfile}
                     onOpenAccountabilityHub={handleOpenAccountabilityHub}
                   />
                   <div className="flex-1 overflow-y-auto no-scrollbar">
@@ -4664,6 +5325,7 @@ export default function App() {
                 onOpenSettings={() => setIsSettingsOpen(true)}
                 onOpenNotifications={() => setIsNotificationsOpen(true)}
                 onNavigateProfile={() => handleSelectScreen('profile')}
+                onLongPressProfile={handleLongPressProfile}
                 onOpenAccountabilityHub={handleOpenAccountabilityHub}
               />
             )}
@@ -4761,14 +5423,26 @@ export default function App() {
       {isSettingsOpen && (
         <SettingsModal
           currentUser={currentUser}
+          theme={theme}
+          onChangeTheme={setTheme}
+          savedAccounts={savedAccounts}
+          onSwitchAccount={handleSwitchAccount}
           onToggleHubPrivacy={handleToggleHubPrivacy}
-          onResetToFreshData={handleResetToFreshData}
           onSignOut={handleSignOut}
           onLogIn={handleLogIn}
           onDeleteAccount={handleDeleteAccount}
           onClose={() => setIsSettingsOpen(false)}
         />
       )}
+
+      <AccountSwitcherModal
+        isOpen={isAccountSwitcherOpen}
+        currentUser={currentUser}
+        savedAccounts={savedAccounts}
+        onSwitchAccount={handleSwitchAccount}
+        onAddAccount={handleLogIn}
+        onClose={() => setIsAccountSwitcherOpen(false)}
+      />
 
       <PostMenuModal
         post={selectedPostForMenu}

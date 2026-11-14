@@ -27,7 +27,7 @@ interface ImageCropModalProps {
   isOpen: boolean;
   imageUrl: string;
   title?: string;
-  mode?: 'avatar' | 'banner' | 'post';
+  mode?: 'avatar' | 'banner' | 'post' | 'square';
   onCropComplete: (croppedDataUrl: string) => void;
   onClose: () => void;
 }
@@ -41,10 +41,15 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
   onClose,
 }) => {
   // Preset Aspect Ratios per mode
-  const getOptionsForMode = (): AspectRatioOption[] => {
+  const getOptionsForMode = useCallback((): AspectRatioOption[] => {
     if (mode === 'avatar') {
       return [
         { label: '1:1 Square', ratio: 1, width: 400, height: 400, tag: '400×400', description: 'Recommended for Profile Avatar' },
+      ];
+    }
+    if (mode === 'square') {
+      return [
+        { label: 'Square', ratio: 1, width: 1080, height: 1080, tag: 'Square', description: 'Square Crop' },
       ];
     }
     if (mode === 'banner') {
@@ -60,10 +65,19 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
       { label: '16:9 Landscape', ratio: 16 / 9, width: 1280, height: 720, tag: '1280×720', description: 'Widescreen Coding / Proof' },
       { label: 'Free / Original', ratio: 0, width: 0, height: 0, tag: 'Auto', description: 'Keep Natural Proportion' },
     ];
-  };
+  }, [mode]);
 
   const ratioOptions = getOptionsForMode();
   const [selectedOption, setSelectedOption] = useState<AspectRatioOption>(ratioOptions[0]);
+
+  useEffect(() => {
+    const opts = getOptionsForMode();
+    setSelectedOption(opts[0]);
+    setCircleMaskPreview(mode === 'avatar');
+    setOffset({ x: 0, y: 0 });
+    setZoom(1);
+    setRotation(0);
+  }, [mode, isOpen, getOptionsForMode]);
   
   // Transform states
   const [zoom, setZoom] = useState(1);
@@ -187,8 +201,8 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
     canvas.width = targetWidth;
     canvas.height = targetHeight;
 
-    // Fill dark background in case of margins
-    ctx.fillStyle = '#080B10';
+    // Fill background in case of margins
+    ctx.fillStyle = document.documentElement.classList.contains('light') ? '#FFFFFF' : '#080B10';
     ctx.fillRect(0, 0, targetWidth, targetHeight);
 
     // Compute transforms on canvas
@@ -256,6 +270,8 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
   const defaultTitle = 
     mode === 'avatar' 
       ? 'Crop Profile Picture (1:1)' 
+      : mode === 'square'
+      ? 'Crop Photo'
       : mode === 'banner' 
       ? 'Crop Profile Banner (1200×400)' 
       : 'Crop Photo to Resolution';
@@ -295,30 +311,32 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
         </div>
 
         {/* Aspect Ratio Options */}
-        <div className="px-4 py-2.5 bg-[#040608] border-b border-[#20242C]/80 flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0">
-          <span className="text-[10px] font-semibold text-[#9298A3] uppercase tracking-wider shrink-0 flex items-center gap-1">
-            <Layers size={11} /> Resolution:
-          </span>
-          {ratioOptions.map((opt) => (
-            <button
-              key={opt.label}
-              type="button"
-              onClick={() => handleSelectOption(opt)}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all cursor-pointer ${
-                selectedOption.label === opt.label
-                  ? 'bg-[#2166FF] text-white shadow-sm'
-                  : 'bg-[#101010] hover:bg-[#1a1f29] text-[#9298A3] hover:text-white border border-[#20242C]'
-              }`}
-            >
-              <span>{opt.label}</span>
-              <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-mono ${
-                selectedOption.label === opt.label ? 'bg-white/20 text-white' : 'bg-black/40 text-[#9298A3]'
-              }`}>
-                {opt.tag}
-              </span>
-            </button>
-          ))}
-        </div>
+        {mode !== 'square' && (
+          <div className="px-4 py-2.5 bg-[#040608] border-b border-[#20242C]/80 flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0">
+            <span className="text-[10px] font-semibold text-[#9298A3] uppercase tracking-wider shrink-0 flex items-center gap-1">
+              <Layers size={11} /> Resolution:
+            </span>
+            {ratioOptions.map((opt) => (
+              <button
+                key={opt.label}
+                type="button"
+                onClick={() => handleSelectOption(opt)}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all cursor-pointer ${
+                  selectedOption.label === opt.label
+                    ? 'bg-[#2166FF] text-white shadow-sm'
+                    : 'bg-[#101010] hover:bg-[#1a1f29] text-[#9298A3] hover:text-white border border-[#20242C]'
+                }`}
+              >
+                <span>{opt.label}</span>
+                <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-mono ${
+                  selectedOption.label === opt.label ? 'bg-white/20 text-white' : 'bg-black/40 text-[#9298A3]'
+                }`}>
+                  {opt.tag}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Viewport Cropper Area */}
         <div className="flex-1 bg-black p-4 flex items-center justify-center overflow-hidden min-h-[260px] relative select-none">
@@ -473,7 +491,7 @@ export const ImageCropModal: React.FC<ImageCropModalProps> = ({
             >
               <Check size={16} />
               <span>
-                {mode === 'post' ? 'Crop & Add to Post' : 'Apply Cropped Photo'}
+                {mode === 'post' ? 'Crop & Add to Post' : mode === 'square' ? 'Apply Crop' : 'Apply Cropped Photo'}
               </span>
             </button>
 

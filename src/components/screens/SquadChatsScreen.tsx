@@ -27,6 +27,7 @@ interface SquadChatsScreenProps {
   initialViewMode?: 'list' | 'detail';
   messages: SquadChatMessage[];
   onBack: () => void;
+  onViewModeChange?: (mode: 'list' | 'detail') => void;
   onSendMessage: (squadId: string, text: string) => void;
   onToggleReaction: (squadId: string, messageId: string, emoji: string) => void;
   onMarkMessagesAsRead?: (squadId: string) => void;
@@ -63,6 +64,7 @@ export const SquadChatsScreen: React.FC<SquadChatsScreenProps> = ({
   initialViewMode = 'list',
   messages,
   onBack,
+  onViewModeChange,
   onSendMessage,
   onToggleReaction,
   onMarkMessagesAsRead,
@@ -84,7 +86,16 @@ export const SquadChatsScreen: React.FC<SquadChatsScreenProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Sync initialSquad prop if it changes
+  const changeViewMode = (nextMode: 'list' | 'detail') => {
+    setViewMode(nextMode);
+    onViewModeChange?.(nextMode);
+  };
+
+  // Sync initialViewMode / initialSquad prop if it changes
+  useEffect(() => {
+    setViewMode(initialViewMode);
+  }, [initialViewMode]);
+
   useEffect(() => {
     if (initialSquad) {
       setSelectedSquad(initialSquad);
@@ -108,7 +119,7 @@ export const SquadChatsScreen: React.FC<SquadChatsScreenProps> = ({
 
   const handleSelectSquad = (sq: Squad) => {
     setSelectedSquad(sq);
-    setViewMode('detail');
+    changeViewMode('detail');
   };
 
   const handleSend = (e: React.FormEvent) => {
@@ -347,7 +358,7 @@ export const SquadChatsScreen: React.FC<SquadChatsScreenProps> = ({
             <div className="flex items-center gap-2.5 min-w-0 flex-1">
               <button
                 type="button"
-                onClick={() => setViewMode('list')}
+                onClick={() => changeViewMode('list')}
                 className="w-8 h-8 rounded-full bg-[#121620] hover:bg-[#1C2230] border border-[#202738] flex items-center justify-center text-[#8A92A6] hover:text-white transition-colors cursor-pointer shrink-0"
                 aria-label="Back to squad chats"
                 title="Back to squad chats list"

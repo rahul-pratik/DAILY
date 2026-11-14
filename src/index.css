@@ -1,8 +1,13 @@
 @import "tailwindcss";
 
 @layer base {
-  :root {
+  :root,
+  html.dark {
     color-scheme: dark;
+  }
+
+  html.light {
+    color-scheme: light;
   }
 
   body {
@@ -13,6 +18,12 @@
     -moz-osx-font-smoothing: grayscale;
     user-select: none;
     touch-action: manipulation;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  html.light body {
+    background-color: #F4F6FA;
+    color: #0F172A;
   }
 }
 
@@ -35,6 +46,18 @@
   background: #2a303c;
 }
 
+html.light ::-webkit-scrollbar-track {
+  background: #F4F6FA;
+}
+
+html.light ::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+}
+
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
 /* Smooth transitions */
 .transition-surface {
   transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
@@ -48,3 +71,321 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* ================= LIGHT THEME GLOBAL OVERRIDES (ALL SCREENS & MODALS) ================= */
+html.light .bg-black {
+  background-color: #F4F6FA !important;
+}
+html.light .bg-black\/95 {
+  background-color: rgba(255, 255, 255, 0.96) !important;
+}
+html.light .bg-black\/90 {
+  background-color: rgba(15, 23, 42, 0.55) !important;
+}
+html.light .bg-black\/85 {
+  background-color: rgba(15, 23, 42, 0.5) !important;
+}
+html.light .bg-black\/80 {
+  background-color: rgba(15, 23, 42, 0.45) !important;
+}
+
+/* Primary elevated surfaces (cards, modals, drawers, inputs) */
+html.light .bg-\[\#040608\],
+html.light .bg-\[\#05070A\],
+html.light .bg-\[\#05070B\],
+html.light .bg-\[\#06080D\],
+html.light .bg-\[\#070A10\] {
+  background-color: #F8FAFC !important;
+}
+
+html.light .bg-\[\#080B10\],
+html.light .bg-\[\#090C12\],
+html.light .bg-\[\#090C13\],
+html.light .bg-\[\#0A0D15\],
+html.light .bg-\[\#0B0F17\],
+html.light .bg-\[\#0B0F19\],
+html.light .bg-\[\#0b1220\],
+html.light .bg-\[\#0c1017\],
+html.light .bg-\[\#0C1018\] {
+  background-color: #FFFFFF !important;
+}
+
+html.light .bg-\[\#080B10\]\/40,
+html.light .bg-\[\#090C13\]\/70 {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+}
+
+html.light .bg-\[\#0D111A\],
+html.light .bg-\[\#0E121B\],
+html.light .bg-\[\#0E131E\],
+html.light .bg-\[\#0E131F\],
+html.light .bg-\[\#0E1424\] {
+  background-color: #F1F5F9 !important;
+}
+
+html.light .bg-\[\#101010\],
+html.light .bg-\[\#10141d\],
+html.light .bg-\[\#10141D\],
+html.light .bg-\[\#10141E\],
+html.light .bg-\[\#10141F\],
+html.light .bg-\[\#101422\],
+html.light .bg-\[\#121620\],
+html.light .bg-\[\#121622\],
+html.light .bg-\[\#121722\] {
+  background-color: #F1F5F9 !important;
+}
+
+html.light .bg-\[\#101010\]\/50,
+html.light .bg-\[\#101010\]\/80,
+html.light .bg-\[\#101010\]\/90,
+html.light .bg-\[\#10141E\]\/95,
+html.light .bg-\[\#121620\]\/60 {
+  background-color: rgba(241, 245, 249, 0.92) !important;
+}
+
+html.light .bg-\[\#141822\],
+html.light .bg-\[\#141926\],
+html.light .bg-\[\#161B26\],
+html.light .bg-\[\#161C28\],
+html.light .bg-\[\#161D29\],
+html.light .bg-\[\#181D28\],
+html.light .bg-\[\#181D2A\],
+html.light .bg-\[\#181D2B\],
+html.light .bg-\[\#181F2E\],
+html.light .bg-\[\#1a1f29\],
+html.light .bg-\[\#1A2030\],
+html.light .bg-\[\#1a2130\],
+html.light .bg-\[\#1A2233\],
+html.light .bg-\[\#1A2234\],
+html.light .bg-\[\#1C2230\],
+html.light .bg-\[\#1C2336\],
+html.light .bg-\[\#1E2433\],
+html.light .bg-\[\#1E2536\],
+html.light .bg-\[\#1f242e\] {
+  background-color: #E2E8F0 !important;
+}
+
+html.light .bg-\[\#091712\] {
+  background-color: #ECFDF5 !important;
+}
+
+html.light .bg-\[\#18150B\] {
+  background-color: #FFFBEB !important;
+}
+
+html.light .bg-red-950\/60 {
+  background-color: #FEF2F2 !important;
+}
+
+html.light .bg-white\/5 {
+  background-color: rgba(15, 23, 42, 0.05) !important;
+}
+html.light .bg-white\/10 {
+  background-color: rgba(15, 23, 42, 0.08) !important;
+}
+html.light .bg-white\/20 {
+  background-color: rgba(15, 23, 42, 0.14) !important;
+}
+
+/* Hover backgrounds */
+html.light .hover\:bg-\[\#0E121B\]:hover,
+html.light .hover\:bg-\[\#101010\]:hover,
+html.light .hover\:bg-\[\#121620\]:hover,
+html.light .hover\:bg-\[\#161B26\]:hover,
+html.light .hover\:bg-\[\#181D2B\]:hover,
+html.light .hover\:bg-\[\#1a1f29\]:hover,
+html.light .hover\:bg-\[\#1A2030\]:hover,
+html.light .hover\:bg-\[\#1A2234\]:hover,
+html.light .hover\:bg-\[\#1C2230\]:hover,
+html.light .hover\:bg-\[\#1C2336\]:hover,
+html.light .hover\:bg-\[\#1E2433\]:hover,
+html.light .hover\:bg-\[\#1f242e\]:hover,
+html.light .hover\:bg-\[\#20242C\]:hover,
+html.light .hover\:bg-\[\#202738\]:hover {
+  background-color: #E2E8F0 !important;
+}
+
+/* Gradient dark surfaces */
+html.light .from-\[\#080B10\] {
+  --tw-gradient-from: #FFFFFF !important;
+}
+html.light .from-\[\#121622\] {
+  --tw-gradient-from: #F1F5F9 !important;
+}
+html.light .via-\[\#080B10\],
+html.light .via-\[\#0d121c\],
+html.light .via-\[\#101827\] {
+  --tw-gradient-via: #F8FAFC !important;
+}
+html.light .to-\[\#080B10\],
+html.light .to-\[\#101010\],
+html.light .to-\[\#1C2333\] {
+  --tw-gradient-to: #E2E8F0 !important;
+}
+
+/* Borders */
+html.light .border-black,
+html.light .border-\[\#080B10\],
+html.light .border-\[\#090C13\],
+html.light .border-\[\#19202E\],
+html.light .border-\[\#1A202E\],
+html.light .border-\[\#1A2130\],
+html.light .border-\[\#1C2230\],
+html.light .border-\[\#1E232F\],
+html.light .border-\[\#1E2536\],
+html.light .border-\[\#1F2738\],
+html.light .border-\[\#20242C\],
+html.light .border-\[\#20242C\]\/40,
+html.light .border-\[\#20242C\]\/50,
+html.light .border-\[\#20242C\]\/60,
+html.light .border-\[\#20242C\]\/70,
+html.light .border-\[\#20242C\]\/80,
+html.light .border-\[\#20242C\]\/90,
+html.light .border-\[\#202738\],
+html.light .border-\[\#202838\],
+html.light .border-\[\#242C3D\],
+html.light .border-\[\#2A3348\],
+html.light .border-\[\#2C364D\] {
+  border-color: #E2E8F0 !important;
+}
+
+html.light .border-white\/10,
+html.light .border-white\/20 {
+  border-color: rgba(15, 23, 42, 0.14) !important;
+}
+
+/* Text colors */
+html.light .text-white {
+  color: #0F172A !important;
+}
+html.light .text-white\/95,
+html.light .text-white\/90 {
+  color: #1E293B !important;
+}
+html.light .text-white\/80 {
+  color: #334155 !important;
+}
+html.light .text-white\/70,
+html.light .text-white\/60 {
+  color: #475569 !important;
+}
+
+html.light .hover\:text-white:hover {
+  color: #0F172A !important;
+}
+
+html.light .text-\[\#c5cbd6\],
+html.light .text-\[\#A8B2C2\],
+html.light .text-\[\#A6B2C0\],
+html.light .text-gray-200,
+html.light .text-gray-300 {
+  color: #334155 !important;
+}
+
+html.light .text-\[\#9298A3\],
+html.light .text-\[\#8A92A6\],
+html.light .text-\[\#788294\],
+html.light .text-\[\#717B90\],
+html.light .text-\[\#555E70\],
+html.light .text-\[\#4A5263\] {
+  color: #475569 !important;
+}
+
+html.light .text-\[\#9298A3\]\/50,
+html.light .text-\[\#9298A3\]\/40,
+html.light .text-\[\#8A92A6\]\/70,
+html.light .text-\[\#8A92A6\]\/60,
+html.light .text-\[\#8A92A6\]\/40 {
+  color: #94A3B8 !important;
+}
+
+html.light .placeholder-\[\#9298A3\]::placeholder,
+html.light .placeholder-\[\#8A92A6\]::placeholder,
+html.light .placeholder-\[\#555E70\]::placeholder {
+  color: #94A3B8 !important;
+}
+
+/* Adjust bright pastel status text for strong contrast on light surfaces */
+html.light .text-emerald-300,
+html.light .text-emerald-400,
+html.light .text-emerald-200 {
+  color: #059669 !important;
+}
+html.light .text-amber-200,
+html.light .text-amber-300,
+html.light .text-amber-400 {
+  color: #B45309 !important;
+}
+html.light .text-red-200,
+html.light .text-red-300,
+html.light .text-red-400 {
+  color: #DC2626 !important;
+}
+html.light .text-rose-300 {
+  color: #BE123C !important;
+}
+html.light .text-purple-300 {
+  color: #7E22CE !important;
+}
+html.light .text-\[\#3B82FF\],
+html.light .text-\[\#60A5FA\] {
+  color: #1D4ED8 !important;
+}
+
+/* Preserve white text on solid accent/destructive/overlay buttons & badges */
+html.light .bg-\[\#2166FF\],
+html.light .bg-\[\#2166FF\] *,
+html.light .bg-\[\#1A52CC\],
+html.light .bg-\[\#1a52cc\],
+html.light .bg-\[\#1a55d6\],
+html.light .bg-\[\#3476FF\],
+html.light .bg-\[\#3B82FF\],
+html.light .bg-\[\#10B981\],
+html.light .bg-red-600,
+html.light .bg-red-600 *,
+html.light .bg-red-500,
+html.light .bg-red-500 *,
+html.light .bg-emerald-600,
+html.light .bg-emerald-600 *,
+html.light .bg-emerald-500,
+html.light .bg-rose-500,
+html.light .bg-black\/75,
+html.light .bg-black\/75 *,
+html.light .bg-black\/70,
+html.light .bg-black\/70 *,
+html.light .bg-black\/60,
+html.light .bg-black\/60 *,
+html.light .bg-black\/50,
+html.light .bg-black\/40 {
+  color: #FFFFFF !important;
+}
+
+html.light .bg-\[\#2166FF\]\/20 .text-white,
+html.light .bg-\[\#2166FF\]\/20.text-white {
+  color: #1D4ED8 !important;
+}
+
+html.light .group:hover .group-hover\:bg-\[\#2166FF\] {
+  color: #FFFFFF !important;
+}
+
+/* Keep solid dark camera preview/lightbox overlays readable */
+html.light .bg-black\/80.hover\:bg-black,
+html.light .bg-black\/80.hover\:bg-black *,
+html.light .bg-black\/80.hover\:bg-\[\#2166FF\],
+html.light .bg-black\/80.hover\:bg-red-500 {
+  background-color: rgba(15, 23, 42, 0.78) !important;
+  color: #FFFFFF !important;
+}
+html.light .bg-black\/80.hover\:bg-\[\#2166FF\]:hover {
+  background-color: #2166FF !important;
+}
+html.light .bg-black\/80.hover\:bg-red-500:hover {
+  background-color: #EF4444 !important;
+}
+
+/* Ensure borders inside banner gradient overlay stay white/subtle */
+html.light [class*="from-black"] .text-white {
+  color: #FFFFFF !important;
+}
+
